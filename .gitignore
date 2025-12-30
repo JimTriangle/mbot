@@ -208,3 +208,7 @@ __marimo__/
 
 # perso
 binance_key
+
+# Bot database
+bot_data.db
+*.db
