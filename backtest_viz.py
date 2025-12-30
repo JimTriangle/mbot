@@ -11,25 +11,31 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 
-def create_backtest_chart(results: Dict) -> go.Figure:
+def create_unified_chart(
+    price_data: List[Dict],
+    trades: List[Dict],
+    title: str = "Graphique de Trading",
+    mode: str = "backtest",
+    pivots: Optional[List[Dict]] = None
+) -> go.Figure:
     """
-    Create comprehensive backtest visualization
+    Create unified trading visualization for both backtest and production
 
     Args:
-        results: Backtest results dictionary from BacktestEngine
+        price_data: List of candles with OHLCV data
+        trades: List of trades (from backtest or production)
+        title: Chart title
+        mode: "backtest" or "production" (affects labels and display)
+        pivots: Optional list of pivot points (for backtest)
 
     Returns:
-        Plotly figure with candlestick chart, trades, pivots, and indicators
+        Plotly figure with candlestick chart, trades, and P&L
     """
-    price_data = results['price_data']
-    trades = results['trades']
-    pivots = results['pivots']
-
     if not price_data:
         # Return empty figure
         fig = go.Figure()
         fig.add_annotation(
-            text="Aucune donnée à afficher",
+            text="Aucune donnée de prix disponible",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -43,6 +49,14 @@ def create_backtest_chart(results: Dict) -> go.Figure:
     df = pd.DataFrame(price_data)
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
 
+    # Determine subtitle based on mode
+    if mode == "backtest":
+        subtitle_1 = 'Prix et Trades (Backtest)'
+        subtitle_2 = 'P&L Cumulé (Simulé)'
+    else:
+        subtitle_1 = 'Prix et Trades (Production)'
+        subtitle_2 = 'P&L Cumulé (Réalisé)'
+
     # Create figure with subplots
     fig = make_subplots(
         rows=2,
@@ -50,7 +64,7 @@ def create_backtest_chart(results: Dict) -> go.Figure:
         shared_xaxes=True,
         vertical_spacing=0.03,
         row_heights=[0.7, 0.3],
-        subplot_titles=('Prix et Trades', 'P&L Cumulé')
+        subplot_titles=(subtitle_1, subtitle_2)
     )
 
     # Add candlestick chart
@@ -69,149 +83,165 @@ def create_backtest_chart(results: Dict) -> go.Figure:
         col=1
     )
 
-    # Add buy signals
-    buy_trades = [t for t in trades if t['side'] == 'BUY']
-    if buy_trades:
-        buy_df = pd.DataFrame(buy_trades)
-        buy_df['datetime'] = pd.to_datetime(buy_df['timestamp'], unit='ms')
+    # Process trades
+    if trades:
+        # Convert trades to DataFrame
+        trades_df = pd.DataFrame(trades)
 
-        fig.add_trace(
-            go.Scatter(
-                x=buy_df['datetime'],
-                y=buy_df['price'],
-                mode='markers',
-                name='Achat',
-                marker=dict(
-                    symbol='triangle-up',
-                    size=15,
-                    color='#00ff00',
-                    line=dict(color='#006400', width=2)
+        # Handle different timestamp formats (ms for backtest, datetime string for production)
+        if 'ts' in trades_df.columns:
+            trades_df['datetime'] = pd.to_datetime(trades_df['ts'])
+        elif 'timestamp' in trades_df.columns:
+            trades_df['datetime'] = pd.to_datetime(trades_df['timestamp'], unit='ms')
+
+        # Add buy signals
+        buy_trades = trades_df[trades_df['side'] == 'BUY']
+        if not buy_trades.empty:
+            label_prefix = "Achat BACKTEST" if mode == "backtest" else "Achat RÉEL"
+            fig.add_trace(
+                go.Scatter(
+                    x=buy_trades['datetime'],
+                    y=buy_trades['price'],
+                    mode='markers',
+                    name=f'Achat ({mode.capitalize()})',
+                    marker=dict(
+                        symbol='triangle-up',
+                        size=15,
+                        color='#00ff00',
+                        line=dict(color='#006400', width=2)
+                    ),
+                    text=[f"{label_prefix}<br>Prix: ${p:.2f}<br>Qty: {q:.6f}"
+                          for p, q in zip(buy_trades['price'], buy_trades['qty'])],
+                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
                 ),
-                text=[f"Achat<br>Prix: ${p:.2f}<br>Qty: {q:.4f}" for p, q in zip(buy_df['price'], buy_df['qty'])],
-                hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-            ),
-            row=1,
-            col=1
-        )
+                row=1,
+                col=1
+            )
 
-    # Add sell signals
-    sell_trades = [t for t in trades if t['side'] == 'SELL']
-    if sell_trades:
-        sell_df = pd.DataFrame(sell_trades)
-        sell_df['datetime'] = pd.to_datetime(sell_df['timestamp'], unit='ms')
+        # Add sell signals
+        sell_trades = trades_df[trades_df['side'] == 'SELL']
+        if not sell_trades.empty:
+            # Color based on profit/loss
+            colors = ['#ff0000' if (pnl and pnl < 0) else '#00ff00'
+                     for pnl in sell_trades['pnl'].fillna(0)]
 
-        # Color based on profit/loss
-        colors = ['#ff0000' if pnl < 0 else '#00ff00' for pnl in sell_df['pnl']]
+            label_prefix = "Vente BACKTEST" if mode == "backtest" else "Vente RÉELLE"
 
-        fig.add_trace(
-            go.Scatter(
-                x=sell_df['datetime'],
-                y=sell_df['price'],
-                mode='markers',
-                name='Vente',
-                marker=dict(
-                    symbol='triangle-down',
-                    size=15,
-                    color=colors,
-                    line=dict(color='#000000', width=2)
+            # Build hover text based on available columns
+            hover_texts = []
+            for _, row in sell_trades.iterrows():
+                text = f"{label_prefix}<br>Prix: ${row['price']:.2f}<br>Qty: {row['qty']:.6f}"
+                if pd.notna(row.get('pnl')):
+                    pnl = row['pnl']
+                    text += f"<br>P&L: ${pnl:.2f}"
+                    if 'pnl_pct' in row and pd.notna(row['pnl_pct']):
+                        text += f" ({row['pnl_pct']:.2f}%)"
+                hover_texts.append(text)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=sell_trades['datetime'],
+                    y=sell_trades['price'],
+                    mode='markers',
+                    name=f'Vente ({mode.capitalize()})',
+                    marker=dict(
+                        symbol='triangle-down',
+                        size=15,
+                        color=colors,
+                        line=dict(color='#000000', width=2)
+                    ),
+                    text=hover_texts,
+                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
                 ),
-                text=[
-                    f"Vente<br>Prix: ${p:.2f}<br>Qty: {q:.4f}<br>P&L: ${pnl:.2f} ({pnl_pct:.2f}%)"
-                    for p, q, pnl, pnl_pct in zip(
-                        sell_df['price'],
-                        sell_df['qty'],
-                        sell_df['pnl'],
-                        sell_df['pnl_pct']
-                    )
-                ],
-                hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-            ),
-            row=1,
-            col=1
-        )
+                row=1,
+                col=1
+            )
 
-    # Add pivot highs
-    pivot_highs = [p for p in pivots if p['type'] == 'HIGH']
-    if pivot_highs:
-        pivot_high_df = pd.DataFrame(pivot_highs)
-        pivot_high_df['datetime'] = pd.to_datetime(pivot_high_df['timestamp'], unit='ms')
+            # Add cumulative P&L chart (only for trades with PnL)
+            sell_with_pnl = sell_trades.dropna(subset=['pnl'])
+            if not sell_with_pnl.empty:
+                sell_with_pnl = sell_with_pnl.sort_values('datetime')
+                sell_with_pnl['cumulative_pnl'] = sell_with_pnl['pnl'].cumsum()
 
-        fig.add_trace(
-            go.Scatter(
-                x=pivot_high_df['datetime'],
-                y=pivot_high_df['price'],
-                mode='markers',
-                name='Pivot Haut',
-                marker=dict(
-                    symbol='star',
-                    size=10,
-                    color='#ff69b4',
-                    line=dict(color='#ff1493', width=1)
+                # Color based on positive/negative
+                colors_pnl = ['#ff0000' if pnl < 0 else '#00ff00'
+                             for pnl in sell_with_pnl['cumulative_pnl']]
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=sell_with_pnl['datetime'],
+                        y=sell_with_pnl['cumulative_pnl'],
+                        mode='lines+markers',
+                        name=f'P&L Cumulé ({mode.capitalize()})',
+                        line=dict(color='#2196F3', width=2),
+                        marker=dict(size=6, color=colors_pnl),
+                        fill='tozeroy',
+                        fillcolor='rgba(33, 150, 243, 0.1)',
+                        text=[f"P&L: ${pnl:.2f}" for pnl in sell_with_pnl['cumulative_pnl']],
+                        hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
+                    ),
+                    row=2,
+                    col=1
+                )
+
+                # Add zero line
+                fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+
+    # Add pivots if provided (backtest mode)
+    if pivots:
+        # Add pivot highs
+        pivot_highs = [p for p in pivots if p['type'] == 'HIGH']
+        if pivot_highs:
+            pivot_high_df = pd.DataFrame(pivot_highs)
+            pivot_high_df['datetime'] = pd.to_datetime(pivot_high_df['timestamp'], unit='ms')
+
+            fig.add_trace(
+                go.Scatter(
+                    x=pivot_high_df['datetime'],
+                    y=pivot_high_df['price'],
+                    mode='markers',
+                    name='Pivot Haut',
+                    marker=dict(
+                        symbol='star',
+                        size=10,
+                        color='#ff69b4',
+                        line=dict(color='#ff1493', width=1)
+                    ),
+                    text=[f"Pivot Haut<br>Prix: ${p:.2f}" for p in pivot_high_df['price']],
+                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
                 ),
-                text=[f"Pivot Haut<br>Prix: ${p:.2f}" for p in pivot_high_df['price']],
-                hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-            ),
-            row=1,
-            col=1
-        )
+                row=1,
+                col=1
+            )
 
-    # Add pivot lows
-    pivot_lows = [p for p in pivots if p['type'] == 'LOW']
-    if pivot_lows:
-        pivot_low_df = pd.DataFrame(pivot_lows)
-        pivot_low_df['datetime'] = pd.to_datetime(pivot_low_df['timestamp'], unit='ms')
+        # Add pivot lows
+        pivot_lows = [p for p in pivots if p['type'] == 'LOW']
+        if pivot_lows:
+            pivot_low_df = pd.DataFrame(pivot_lows)
+            pivot_low_df['datetime'] = pd.to_datetime(pivot_low_df['timestamp'], unit='ms')
 
-        fig.add_trace(
-            go.Scatter(
-                x=pivot_low_df['datetime'],
-                y=pivot_low_df['price'],
-                mode='markers',
-                name='Pivot Bas',
-                marker=dict(
-                    symbol='star',
-                    size=10,
-                    color='#87ceeb',
-                    line=dict(color='#4682b4', width=1)
+            fig.add_trace(
+                go.Scatter(
+                    x=pivot_low_df['datetime'],
+                    y=pivot_low_df['price'],
+                    mode='markers',
+                    name='Pivot Bas',
+                    marker=dict(
+                        symbol='star',
+                        size=10,
+                        color='#87ceeb',
+                        line=dict(color='#4682b4', width=1)
+                    ),
+                    text=[f"Pivot Bas<br>Prix: ${p:.2f}" for p in pivot_low_df['price']],
+                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
                 ),
-                text=[f"Pivot Bas<br>Prix: ${p:.2f}" for p in pivot_low_df['price']],
-                hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-            ),
-            row=1,
-            col=1
-        )
-
-    # Add cumulative P&L chart
-    if sell_trades:
-        sell_df = pd.DataFrame(sell_trades)
-        sell_df['datetime'] = pd.to_datetime(sell_df['timestamp'], unit='ms')
-        sell_df['cumulative_pnl'] = sell_df['pnl'].cumsum()
-
-        # Color based on positive/negative
-        colors_pnl = ['#ff0000' if pnl < 0 else '#00ff00' for pnl in sell_df['cumulative_pnl']]
-
-        fig.add_trace(
-            go.Scatter(
-                x=sell_df['datetime'],
-                y=sell_df['cumulative_pnl'],
-                mode='lines+markers',
-                name='P&L Cumulé',
-                line=dict(color='#2196F3', width=2),
-                marker=dict(size=6, color=colors_pnl),
-                fill='tozeroy',
-                fillcolor='rgba(33, 150, 243, 0.1)',
-                text=[f"P&L: ${pnl:.2f}" for pnl in sell_df['cumulative_pnl']],
-                hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-            ),
-            row=2,
-            col=1
-        )
-
-        # Add zero line
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+                row=1,
+                col=1
+            )
 
     # Update layout
     fig.update_layout(
-        title='Résultats du Backtesting - Stratégie 3 Swings',
+        title=title,
         xaxis_title='Date',
         yaxis_title='Prix ($)',
         xaxis2_title='Date',
@@ -227,44 +257,35 @@ def create_backtest_chart(results: Dict) -> go.Figure:
             x=1
         ),
         template='plotly_dark',
-        # Preserve UI state during interactions
         uirevision='constant'
     )
 
     # Calculate reasonable Y-axis range to handle outliers
-    # This prevents a single extreme candle from making the rest of the chart unreadable
     all_highs = df['high'].values
     all_lows = df['low'].values
 
-    # Use percentiles to identify reasonable price range
-    # This excludes extreme outliers from the initial view
-    p1 = np.percentile(all_highs, 1)   # 1st percentile
-    p99 = np.percentile(all_highs, 99)  # 99th percentile
+    p1 = np.percentile(all_highs, 1)
+    p99 = np.percentile(all_highs, 99)
     l1 = np.percentile(all_lows, 1)
-    l99 = np.percentile(all_lows, 99)
 
-    # Determine if there are extreme outliers (values > 3x the 99th percentile range)
     price_range = p99 - l1
     max_high = np.max(all_highs)
     has_extreme_outlier = max_high > (p99 + 2 * price_range)
 
     if has_extreme_outlier:
-        # If we have extreme outliers, set a fixed range based on percentiles
-        # Add 5% margin for better visibility
         margin = price_range * 0.05
         y_min = l1 - margin
         y_max = p99 + margin
 
         fig.update_yaxes(
             range=[y_min, y_max],
-            fixedrange=False,  # Allow manual zoom
+            fixedrange=False,
             row=1,
             col=1
         )
 
-        # Add annotation to inform user about outliers
         fig.add_annotation(
-            text="⚠️ Valeurs extrêmes détectées - Échelle ajustée. Zoomez ou utilisez 'Autoscale' pour voir toutes les données",
+            text="⚠️ Valeurs extrêmes détectées - Échelle ajustée. Zoomez pour voir toutes les données",
             xref="paper",
             yref="paper",
             x=0.5,
@@ -280,7 +301,6 @@ def create_backtest_chart(results: Dict) -> go.Figure:
             col=1
         )
     else:
-        # No extreme outliers, use auto-ranging
         fig.update_yaxes(
             autorange=True,
             fixedrange=False,
@@ -288,7 +308,6 @@ def create_backtest_chart(results: Dict) -> go.Figure:
             col=1
         )
 
-    # Configure X-axis
     fig.update_xaxes(
         rangeslider_visible=False,
         row=1,
@@ -296,6 +315,25 @@ def create_backtest_chart(results: Dict) -> go.Figure:
     )
 
     return fig
+
+
+def create_backtest_chart(results: Dict) -> go.Figure:
+    """
+    Create backtest visualization (wrapper for create_unified_chart)
+
+    Args:
+        results: Backtest results dictionary from BacktestEngine
+
+    Returns:
+        Plotly figure with candlestick chart, trades, pivots, and indicators
+    """
+    return create_unified_chart(
+        price_data=results['price_data'],
+        trades=results['trades'],
+        title='Résultats du Backtesting - Stratégie 3 Swings',
+        mode='backtest',
+        pivots=results.get('pivots')
+    )
 
 
 def create_statistics_summary(stats: Dict) -> str:
@@ -475,7 +513,7 @@ def create_production_chart(
     title: str = "Graphique de Production - Trading en Direct"
 ) -> go.Figure:
     """
-    Create production trading visualization with the same format as backtest
+    Create production trading visualization (wrapper for create_unified_chart)
 
     Args:
         price_data: List of candles with OHLCV data
@@ -485,220 +523,10 @@ def create_production_chart(
     Returns:
         Plotly figure with candlestick chart and trades
     """
-    if not price_data:
-        # Return empty figure
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Aucune donnée de prix disponible",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=20)
-        )
-        return fig
-
-    # Convert price data to DataFrame
-    df = pd.DataFrame(price_data)
-    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-    # Create figure with subplots
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.7, 0.3],
-        subplot_titles=('Prix et Trades (Production)', 'P&L Cumulé (Réalisé)')
-    )
-
-    # Add candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=df['datetime'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            name='Prix',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350'
-        ),
-        row=1,
-        col=1
-    )
-
-    # Process trades
-    if trades:
-        # Convert trades to DataFrame
-        trades_df = pd.DataFrame(trades)
-
-        # Convert timestamp
-        if 'ts' in trades_df.columns:
-            trades_df['datetime'] = pd.to_datetime(trades_df['ts'])
-        elif 'timestamp' in trades_df.columns:
-            trades_df['datetime'] = pd.to_datetime(trades_df['timestamp'], unit='ms')
-
-        # Add buy signals
-        buy_trades = trades_df[trades_df['side'] == 'BUY']
-        if not buy_trades.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=buy_trades['datetime'],
-                    y=buy_trades['price'],
-                    mode='markers',
-                    name='Achat (Production)',
-                    marker=dict(
-                        symbol='triangle-up',
-                        size=15,
-                        color='#00ff00',
-                        line=dict(color='#006400', width=2)
-                    ),
-                    text=[f"Achat RÉEL<br>Prix: ${p:.2f}<br>Qty: {q:.6f}"
-                          for p, q in zip(buy_trades['price'], buy_trades['qty'])],
-                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-                ),
-                row=1,
-                col=1
-            )
-
-        # Add sell signals
-        sell_trades = trades_df[trades_df['side'] == 'SELL']
-        if not sell_trades.empty:
-            # Color based on profit/loss
-            colors = ['#ff0000' if (pnl and pnl < 0) else '#00ff00'
-                     for pnl in sell_trades['pnl'].fillna(0)]
-
-            fig.add_trace(
-                go.Scatter(
-                    x=sell_trades['datetime'],
-                    y=sell_trades['price'],
-                    mode='markers',
-                    name='Vente (Production)',
-                    marker=dict(
-                        symbol='triangle-down',
-                        size=15,
-                        color=colors,
-                        line=dict(color='#000000', width=2)
-                    ),
-                    text=[
-                        f"Vente RÉELLE<br>Prix: ${p:.2f}<br>Qty: {q:.6f}<br>P&L: ${pnl:.2f}"
-                        for p, q, pnl in zip(
-                            sell_trades['price'],
-                            sell_trades['qty'],
-                            sell_trades['pnl'].fillna(0)
-                        )
-                    ],
-                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-                ),
-                row=1,
-                col=1
-            )
-
-        # Add cumulative P&L chart (only for SELL trades with PnL)
-        sell_with_pnl = sell_trades.dropna(subset=['pnl'])
-        if not sell_with_pnl.empty:
-            sell_with_pnl = sell_with_pnl.sort_values('datetime')
-            sell_with_pnl['cumulative_pnl'] = sell_with_pnl['pnl'].cumsum()
-
-            # Color based on positive/negative
-            colors_pnl = ['#ff0000' if pnl < 0 else '#00ff00'
-                         for pnl in sell_with_pnl['cumulative_pnl']]
-
-            fig.add_trace(
-                go.Scatter(
-                    x=sell_with_pnl['datetime'],
-                    y=sell_with_pnl['cumulative_pnl'],
-                    mode='lines+markers',
-                    name='P&L Cumulé (Production)',
-                    line=dict(color='#2196F3', width=2),
-                    marker=dict(size=6, color=colors_pnl),
-                    fill='tozeroy',
-                    fillcolor='rgba(33, 150, 243, 0.1)',
-                    text=[f"P&L: ${pnl:.2f}" for pnl in sell_with_pnl['cumulative_pnl']],
-                    hovertemplate='<b>%{text}</b><br>%{x}<extra></extra>'
-                ),
-                row=2,
-                col=1
-            )
-
-            # Add zero line
-            fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
-
-    # Update layout
-    fig.update_layout(
+    return create_unified_chart(
+        price_data=price_data,
+        trades=trades,
         title=title,
-        xaxis_title='Date',
-        yaxis_title='Prix ($)',
-        xaxis2_title='Date',
-        yaxis2_title='P&L Cumulé ($)',
-        hovermode='x unified',
-        height=800,
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
-        template='plotly_dark',
-        uirevision='constant'
+        mode='production',
+        pivots=None
     )
-
-    # Calculate reasonable Y-axis range
-    all_highs = df['high'].values
-    all_lows = df['low'].values
-
-    p1 = np.percentile(all_highs, 1)
-    p99 = np.percentile(all_highs, 99)
-    l1 = np.percentile(all_lows, 1)
-
-    price_range = p99 - l1
-    max_high = np.max(all_highs)
-    has_extreme_outlier = max_high > (p99 + 2 * price_range)
-
-    if has_extreme_outlier:
-        margin = price_range * 0.05
-        y_min = l1 - margin
-        y_max = p99 + margin
-
-        fig.update_yaxes(
-            range=[y_min, y_max],
-            fixedrange=False,
-            row=1,
-            col=1
-        )
-
-        fig.add_annotation(
-            text="⚠️ Valeurs extrêmes détectées - Échelle ajustée. Zoomez pour voir toutes les données",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.98,
-            xanchor="center",
-            yanchor="top",
-            showarrow=False,
-            font=dict(size=10, color="orange"),
-            bgcolor="rgba(0,0,0,0.6)",
-            bordercolor="orange",
-            borderwidth=1,
-            row=1,
-            col=1
-        )
-    else:
-        fig.update_yaxes(
-            autorange=True,
-            fixedrange=False,
-            row=1,
-            col=1
-        )
-
-    fig.update_xaxes(
-        rangeslider_visible=False,
-        row=1,
-        col=1
-    )
-
-    return fig
