@@ -260,319 +260,325 @@ symbol_filter = st.text_input("Filtrer par symbole (optionnel)", value=os.getenv
 logs = fetch_logs(symbol_filter if symbol_filter else None, limit=200)
 st.dataframe(pd.DataFrame(logs))
 
-# ---- Backtesting Section ----
+# ---- Tabs for TEST and PROD ----
 st.divider()
-st.header("🔬 Backtesting - Simulation sur Graphiques de Production")
-st.markdown("""
-**Testez votre stratégie sans risquer d'argent réel !**
+st.header("📊 Analyse de Performance")
 
-Le backtest simule votre stratégie 3 Swings sur des données historiques et affiche les résultats
-sur les **mêmes graphiques que vous verriez en production**. Cela vous permet de :
-- ✅ Visualiser le résultat "réel" de votre stratégie appliquée sans dépenser d'argent
-- ✅ Comparer les résultats simulés avec vos trades de production réels (section ci-dessous)
-- ✅ Valider votre stratégie avant de la déployer en mode production
+tab_test, tab_prod = st.tabs(["🔬 TEST (Backtest)", "📈 PROD (Trading Réel)"])
 
-Les graphiques interactifs montrent les chandeliers, les points d'entrée/sortie, et le P&L cumulé
-exactement comme vous les verriez en trading réel.
+# ---- TEST TAB: Backtesting Section ----
+with tab_test:
+    st.subheader("🔬 Backtesting - Simulation sur Graphiques de Production")
+    st.markdown("""
+    **Testez votre stratégie sans risquer d'argent réel !**
 
-ℹ️ **Note importante :** Les données historiques sont **toujours récupérées depuis l'API Binance de production**
-pour garantir que vous testez sur des données réelles de marché, peu importe votre mode testnet/production.
-""")
+    Le backtest simule votre stratégie 3 Swings sur des données historiques et affiche les résultats
+    sur les **mêmes graphiques que vous verriez en production**. Cela vous permet de :
+    - ✅ Visualiser le résultat "réel" de votre stratégie appliquée sans dépenser d'argent
+    - ✅ Comparer les résultats simulés avec vos trades de production réels (onglet PROD)
+    - ✅ Valider votre stratégie avant de la déployer en mode production
 
-with st.expander("⚙️ Configuration du Backtest", expanded=True):
-    bt_col1, bt_col2 = st.columns(2)
+    Les graphiques interactifs montrent les chandeliers, les points d'entrée/sortie, et le P&L cumulé
+    exactement comme vous les verriez en trading réel.
 
-    with bt_col1:
-        bt_symbol = st.text_input("Symbole pour backtest", "BTCUSDT", key="bt_symbol")
-        bt_interval = st.selectbox("Intervalle", ["1m","3m","5m","15m","30m","1h","4h","1d"], index=4, key="bt_interval")
-        bt_days = st.slider("Période (jours)", min_value=1, max_value=90, value=30)
+    ℹ️ **Note importante :** Les données historiques sont **toujours récupérées depuis l'API Binance de production**
+    pour garantir que vous testez sur des données réelles de marché, peu importe votre mode testnet/production.
+    """)
 
-    with bt_col2:
-        bt_allocation_pct = st.slider("Allocation par trade (% du capital disponible)", min_value=1.0, max_value=100.0, value=10.0, step=1.0)
-        bt_capital = st.number_input("Capital initial (USDT)", min_value=100.0, value=10000.0, step=100.0)
+    with st.expander("⚙️ Configuration du Backtest", expanded=True):
+        bt_col1, bt_col2 = st.columns(2)
 
-    # Date range calculation
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=bt_days)
+        with bt_col1:
+            bt_symbol = st.text_input("Symbole pour backtest", "BTCUSDT", key="bt_symbol")
+            bt_interval = st.selectbox("Intervalle", ["1m","3m","5m","15m","30m","1h","4h","1d"], index=4, key="bt_interval")
+            bt_days = st.slider("Période (jours)", min_value=1, max_value=90, value=30)
 
-    st.info(f"📅 Période de test: {start_date.strftime('%Y-%m-%d %H:%M')} → {end_date.strftime('%Y-%m-%d %H:%M')}")
+        with bt_col2:
+            bt_allocation_pct = st.slider("Allocation par trade (% du capital disponible)", min_value=1.0, max_value=100.0, value=10.0, step=1.0)
+            bt_capital = st.number_input("Capital initial (USDT)", min_value=100.0, value=10000.0, step=100.0)
 
-    run_backtest = st.button("🚀 Lancer la Simulation", type="primary", use_container_width=True)
+        # Date range calculation
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=bt_days)
 
-if run_backtest:
-    with st.spinner("⏳ Téléchargement des données et exécution du backtest..."):
-        try:
-            # Run backtest asynchronously
-            results = asyncio.run(run_backtest_async(
-                symbol=bt_symbol,
-                interval=bt_interval,
-                start_date=start_date,
-                end_date=end_date,
-                allocation_pct=bt_allocation_pct,
-                initial_capital=bt_capital,
-                testnet=default_testnet,
-                api_key=api_key,
-                api_secret=api_sec
-            ))
+        st.info(f"📅 Période de test: {start_date.strftime('%Y-%m-%d %H:%M')} → {end_date.strftime('%Y-%m-%d %H:%M')}")
 
-            # Store results in session state
-            st.session_state['backtest_results'] = results
-            st.success("✅ Simulation terminée avec succès!")
+        run_backtest = st.button("🚀 Lancer la Simulation", type="primary", use_container_width=True)
 
-        except Exception as e:
-            st.error(f"❌ Erreur lors du backtest: {str(e)}")
-            st.exception(e)
+    if run_backtest:
+        with st.spinner("⏳ Téléchargement des données et exécution du backtest..."):
+            try:
+                # Run backtest asynchronously
+                results = asyncio.run(run_backtest_async(
+                    symbol=bt_symbol,
+                    interval=bt_interval,
+                    start_date=start_date,
+                    end_date=end_date,
+                    allocation_pct=bt_allocation_pct,
+                    initial_capital=bt_capital,
+                    testnet=default_testnet,
+                    api_key=api_key,
+                    api_secret=api_sec
+                ))
 
-# Display backtest results if available
-if 'backtest_results' in st.session_state:
-    results = st.session_state['backtest_results']
+                # Store results in session state
+                st.session_state['backtest_results'] = results
+                st.success("✅ Simulation terminée avec succès!")
 
-    st.divider()
-    st.subheader("📊 Résultats de la Simulation")
+            except Exception as e:
+                st.error(f"❌ Erreur lors du backtest: {str(e)}")
+                st.exception(e)
 
-    # Display statistics summary
-    st.markdown(create_statistics_summary(results['statistics']))
+    # Display backtest results if available
+    if 'backtest_results' in st.session_state:
+        results = st.session_state['backtest_results']
 
-    # Display interactive chart
-    st.divider()
-    st.subheader("📈 Graphique Interactif")
-    st.info("💡 **Astuce de Zoom :**\n"
-            "- Le graphique ajuste automatiquement l'échelle pour éviter que les valeurs extrêmes ne rendent le reste illisible\n"
-            "- Cliquez et glissez sur le graphique pour zoomer sur une zone spécifique\n"
-            "- Double-cliquez n'importe où pour réinitialiser le zoom et voir toutes les données\n"
-            "- Utilisez les boutons de la barre d'outils (en haut à droite) pour contrôler le zoom")
-    fig = create_backtest_chart(results)
-
-    # Configure Plotly chart with toolbar options for better zoom control
-    plotly_config = {
-        'displayModeBar': True,
-        'displaylogo': False,
-        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
-        'toImageButtonOptions': {
-            'format': 'png',
-            'filename': f'backtest_{bt_symbol}',
-            'height': 800,
-            'width': 1400,
-            'scale': 2
-        }
-    }
-
-    st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-
-    # Display trades table
-    st.divider()
-    st.subheader("📝 Détail des Trades")
-
-    trades_df = create_trades_dataframe(results['trades'])
-    if not trades_df.empty:
-        # Add filters
-        filter_col1, filter_col2 = st.columns(2)
-        with filter_col1:
-            filter_type = st.multiselect(
-                "Filtrer par type",
-                options=["BUY", "SELL"],
-                default=["BUY", "SELL"]
-            )
-
-        # Apply filters
-        if filter_type:
-            mask = trades_df['Type'].isin(filter_type) if 'Type' in trades_df.columns else [True] * len(trades_df)
-            filtered_df = trades_df[mask]
-        else:
-            filtered_df = trades_df
-
-        st.dataframe(filtered_df, use_container_width=True, height=400)
-
-        # Download button
-        csv = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="💾 Télécharger les trades (CSV)",
-            data=csv,
-            file_name=f"backtest_{bt_symbol}_{start_date.strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("Aucun trade exécuté durant la simulation.")
-
-    # Clear results button
-    if st.button("🗑️ Effacer les résultats"):
-        del st.session_state['backtest_results']
-        st.rerun()
-
-# ---- Production Charts Section ----
-st.divider()
-st.header("📊 Graphiques de Production - Trades Réels")
-st.markdown("""
-Visualisez vos trades de production réels avec les mêmes graphiques interactifs que le backtest.
-Cela vous permet de comparer les résultats simulés avec les résultats réels de votre bot.
-""")
-
-with st.expander("⚙️ Configuration de la Visualisation de Production", expanded=True):
-    prod_col1, prod_col2 = st.columns(2)
-
-    with prod_col1:
-        # Get available symbols from trades
-        all_prod_trades = fetch_trades(limit=10000)
-        prod_symbols = sorted(list({t["symbol"] for t in all_prod_trades})) if all_prod_trades else []
-
-        if prod_symbols:
-            prod_symbol = st.selectbox("Symbole", prod_symbols, key="prod_symbol")
-            prod_interval = st.selectbox(
-                "Intervalle (pour données de prix)",
-                ["1m","3m","5m","15m","30m","1h","4h","1d"],
-                index=4,
-                key="prod_interval"
-            )
-        else:
-            st.info("Aucun trade de production trouvé dans la base de données.")
-            prod_symbol = None
-
-    with prod_col2:
-        if prod_symbol:
-            # Get date range from trades
-            symbol_trades = [t for t in all_prod_trades if t["symbol"] == prod_symbol]
-            if symbol_trades:
-                dates = [datetime.fromisoformat(t["ts"]) for t in symbol_trades]
-                min_date = min(dates)
-                max_date = max(dates)
-
-                # Add some margin
-                chart_start = min_date - timedelta(hours=24)
-                chart_end = max_date + timedelta(hours=24)
-
-                st.info(f"📅 Période couverte: {min_date.strftime('%Y-%m-%d %H:%M')} → {max_date.strftime('%Y-%m-%d %H:%M')}")
-                st.info(f"💰 Nombre de trades: {len(symbol_trades)}")
-
-    if prod_symbol:
-        load_production = st.button("📈 Charger les Graphiques de Production", type="primary", use_container_width=True)
-    else:
-        load_production = False
-
-if prod_symbol and load_production:
-    with st.spinner("⏳ Chargement des données de production..."):
-        try:
-            # Fetch production trades for this symbol
-            symbol_trades = [t for t in all_prod_trades if t["symbol"] == prod_symbol]
-
-            if not symbol_trades:
-                st.warning("Aucun trade trouvé pour ce symbole.")
-            else:
-                # Get date range
-                dates = [datetime.fromisoformat(t["ts"]) for t in symbol_trades]
-                chart_start = min(dates) - timedelta(hours=24)
-                chart_end = max(dates) + timedelta(hours=24)
-
-                # Fetch historical price data from Binance
-                from binance import AsyncClient
-
-                async def fetch_prod_data():
-                    # ALWAYS use production API for real historical price data
-                    client = await AsyncClient.create(
-                        api_key=api_key,
-                        api_secret=api_sec,
-                        testnet=False  # Force production for real market data
-                    )
-                    try:
-                        start_ms = int(chart_start.timestamp() * 1000)
-                        end_ms = int(chart_end.timestamp() * 1000)
-
-                        klines = await client.get_historical_klines(
-                            prod_symbol,
-                            prod_interval,
-                            start_ms,
-                            end_ms
-                        )
-
-                        # Convert to our format
-                        candles = []
-                        for k in klines:
-                            candle = {
-                                'timestamp': int(k[0]),
-                                'open': float(k[1]),
-                                'high': float(k[2]),
-                                'low': float(k[3]),
-                                'close': float(k[4]),
-                                'volume': float(k[5]),
-                            }
-                            candles.append(candle)
-
-                        return candles
-                    finally:
-                        await client.close_connection()
-
-                price_data = asyncio.run(fetch_prod_data())
-
-                # Store in session state
-                st.session_state['production_data'] = {
-                    'price_data': price_data,
-                    'trades': symbol_trades,
-                    'symbol': prod_symbol
-                }
-
-                st.success("✅ Données de production chargées avec succès!")
-
-        except Exception as e:
-            st.error(f"❌ Erreur lors du chargement: {str(e)}")
-            st.exception(e)
-
-# Display production chart if available
-if 'production_data' in st.session_state:
-    prod_data = st.session_state['production_data']
-
-    st.divider()
-    st.subheader(f"📊 Graphiques de Production - {prod_data['symbol']}")
-
-    # Create and display chart
-    fig = create_production_chart(
-        prod_data['price_data'],
-        prod_data['trades'],
-        title=f"Trading en Production - {prod_data['symbol']}"
-    )
-
-    plotly_config = {
-        'displayModeBar': True,
-        'displaylogo': False,
-        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
-        'toImageButtonOptions': {
-            'format': 'png',
-            'filename': f'production_{prod_data["symbol"]}',
-            'height': 800,
-            'width': 1400,
-            'scale': 2
-        }
-    }
-
-    st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-
-    # Display statistics
-    st.divider()
-    st.subheader("📊 Statistiques de Production")
-
-    trades = prod_data['trades']
-    sell_trades = [t for t in trades if t['side'] == 'SELL' and t.get('pnl') is not None]
-
-    if sell_trades:
-        total_pnl = sum(t['pnl'] for t in sell_trades)
-        wins = [t for t in sell_trades if t['pnl'] > 0]
-        losses = [t for t in sell_trades if t['pnl'] <= 0]
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Trades Fermés", len(sell_trades))
-        col2.metric("Win Rate", f"{len(wins)/len(sell_trades)*100:.1f}%")
-        col3.metric("P&L Total", f"${total_pnl:.2f}", delta=f"{total_pnl:.2f}")
-        col4.metric("Avg P&L", f"${total_pnl/len(sell_trades):.2f}")
-
-        # Trades table
         st.divider()
-        st.subheader("📝 Détail des Trades de Production")
-        trades_df = create_trades_dataframe(trades)
-        st.dataframe(trades_df, use_container_width=True, height=400)
-    else:
-        st.info("Aucun trade fermé (SELL) avec P&L pour ce symbole.")
+        st.subheader("📊 Résultats de la Simulation")
 
-    # Clear button
-    if st.button("🗑️ Effacer les graphiques de production"):
-        del st.session_state['production_data']
-        st.rerun()
+        # Display statistics summary
+        st.markdown(create_statistics_summary(results['statistics']))
+
+        # Display interactive chart
+        st.divider()
+        st.subheader("📈 Graphique Interactif")
+        st.info("💡 **Astuce de Zoom :**\n"
+                "- Le graphique ajuste automatiquement l'échelle pour éviter que les valeurs extrêmes ne rendent le reste illisible\n"
+                "- Cliquez et glissez sur le graphique pour zoomer sur une zone spécifique\n"
+                "- Double-cliquez n'importe où pour réinitialiser le zoom et voir toutes les données\n"
+                "- Utilisez les boutons de la barre d'outils (en haut à droite) pour contrôler le zoom")
+        fig = create_backtest_chart(results)
+
+        # Configure Plotly chart with toolbar options for better zoom control
+        plotly_config = {
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': f'backtest_{bt_symbol}',
+                'height': 800,
+                'width': 1400,
+                'scale': 2
+            }
+        }
+
+        st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+
+        # Display trades table
+        st.divider()
+        st.subheader("📝 Détail des Trades")
+
+        trades_df = create_trades_dataframe(results['trades'])
+        if not trades_df.empty:
+            # Add filters
+            filter_col1, filter_col2 = st.columns(2)
+            with filter_col1:
+                filter_type = st.multiselect(
+                    "Filtrer par type",
+                    options=["BUY", "SELL"],
+                    default=["BUY", "SELL"]
+                )
+
+            # Apply filters
+            if filter_type:
+                mask = trades_df['Type'].isin(filter_type) if 'Type' in trades_df.columns else [True] * len(trades_df)
+                filtered_df = trades_df[mask]
+            else:
+                filtered_df = trades_df
+
+            st.dataframe(filtered_df, use_container_width=True, height=400)
+
+            # Download button
+            csv = filtered_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="💾 Télécharger les trades (CSV)",
+                data=csv,
+                file_name=f"backtest_{bt_symbol}_{start_date.strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("Aucun trade exécuté durant la simulation.")
+
+        # Clear results button
+        if st.button("🗑️ Effacer les résultats"):
+            del st.session_state['backtest_results']
+            st.rerun()
+
+# ---- PROD TAB: Production Charts Section ----
+with tab_prod:
+    st.subheader("📊 Graphiques de Production - Trades Réels")
+    st.markdown("""
+    Visualisez vos trades de production réels avec les mêmes graphiques interactifs que le backtest.
+    Cela vous permet de comparer les résultats simulés avec les résultats réels de votre bot.
+    """)
+
+    with st.expander("⚙️ Configuration de la Visualisation de Production", expanded=True):
+        prod_col1, prod_col2 = st.columns(2)
+
+        with prod_col1:
+            # Get available symbols from trades
+            all_prod_trades = fetch_trades(limit=10000)
+            prod_symbols = sorted(list({t["symbol"] for t in all_prod_trades})) if all_prod_trades else []
+
+            if prod_symbols:
+                prod_symbol = st.selectbox("Symbole", prod_symbols, key="prod_symbol")
+                prod_interval = st.selectbox(
+                    "Intervalle (pour données de prix)",
+                    ["1m","3m","5m","15m","30m","1h","4h","1d"],
+                    index=4,
+                    key="prod_interval"
+                )
+            else:
+                st.info("Aucun trade de production trouvé dans la base de données.")
+                prod_symbol = None
+
+        with prod_col2:
+            if prod_symbol:
+                # Get date range from trades
+                symbol_trades = [t for t in all_prod_trades if t["symbol"] == prod_symbol]
+                if symbol_trades:
+                    dates = [datetime.fromisoformat(t["ts"]) for t in symbol_trades]
+                    min_date = min(dates)
+                    max_date = max(dates)
+
+                    # Add some margin
+                    chart_start = min_date - timedelta(hours=24)
+                    chart_end = max_date + timedelta(hours=24)
+
+                    st.info(f"📅 Période couverte: {min_date.strftime('%Y-%m-%d %H:%M')} → {max_date.strftime('%Y-%m-%d %H:%M')}")
+                    st.info(f"💰 Nombre de trades: {len(symbol_trades)}")
+
+        if prod_symbol:
+            load_production = st.button("📈 Charger les Graphiques de Production", type="primary", use_container_width=True)
+        else:
+            load_production = False
+
+    if prod_symbol and load_production:
+        with st.spinner("⏳ Chargement des données de production..."):
+            try:
+                # Fetch production trades for this symbol
+                symbol_trades = [t for t in all_prod_trades if t["symbol"] == prod_symbol]
+
+                if not symbol_trades:
+                    st.warning("Aucun trade trouvé pour ce symbole.")
+                else:
+                    # Get date range
+                    dates = [datetime.fromisoformat(t["ts"]) for t in symbol_trades]
+                    chart_start = min(dates) - timedelta(hours=24)
+                    chart_end = max(dates) + timedelta(hours=24)
+
+                    # Fetch historical price data from Binance
+                    from binance import AsyncClient
+
+                    async def fetch_prod_data():
+                        # ALWAYS use production API for real historical price data
+                        client = await AsyncClient.create(
+                            api_key=api_key,
+                            api_secret=api_sec,
+                            testnet=False  # Force production for real market data
+                        )
+                        try:
+                            start_ms = int(chart_start.timestamp() * 1000)
+                            end_ms = int(chart_end.timestamp() * 1000)
+
+                            klines = await client.get_historical_klines(
+                                prod_symbol,
+                                prod_interval,
+                                start_ms,
+                                end_ms
+                            )
+
+                            # Convert to our format
+                            candles = []
+                            for k in klines:
+                                candle = {
+                                    'timestamp': int(k[0]),
+                                    'open': float(k[1]),
+                                    'high': float(k[2]),
+                                    'low': float(k[3]),
+                                    'close': float(k[4]),
+                                    'volume': float(k[5]),
+                                }
+                                candles.append(candle)
+
+                            return candles
+                        finally:
+                            await client.close_connection()
+
+                    price_data = asyncio.run(fetch_prod_data())
+
+                    # Store in session state
+                    st.session_state['production_data'] = {
+                        'price_data': price_data,
+                        'trades': symbol_trades,
+                        'symbol': prod_symbol
+                    }
+
+                    st.success("✅ Données de production chargées avec succès!")
+
+            except Exception as e:
+                st.error(f"❌ Erreur lors du chargement: {str(e)}")
+                st.exception(e)
+
+    # Display production chart if available
+    if 'production_data' in st.session_state:
+        prod_data = st.session_state['production_data']
+
+        st.divider()
+        st.subheader(f"📊 Graphiques de Production - {prod_data['symbol']}")
+
+        # Create and display chart
+        fig = create_production_chart(
+            prod_data['price_data'],
+            prod_data['trades'],
+            title=f"Trading en Production - {prod_data['symbol']}"
+        )
+
+        plotly_config = {
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': f'production_{prod_data["symbol"]}',
+                'height': 800,
+                'width': 1400,
+                'scale': 2
+            }
+        }
+
+        st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+
+        # Display statistics
+        st.divider()
+        st.subheader("📊 Statistiques de Production")
+
+        trades = prod_data['trades']
+        sell_trades = [t for t in trades if t['side'] == 'SELL' and t.get('pnl') is not None]
+
+        if sell_trades:
+            total_pnl = sum(t['pnl'] for t in sell_trades)
+            wins = [t for t in sell_trades if t['pnl'] > 0]
+            losses = [t for t in sell_trades if t['pnl'] <= 0]
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Trades Fermés", len(sell_trades))
+            col2.metric("Win Rate", f"{len(wins)/len(sell_trades)*100:.1f}%")
+            col3.metric("P&L Total", f"${total_pnl:.2f}", delta=f"{total_pnl:.2f}")
+            col4.metric("Avg P&L", f"${total_pnl/len(sell_trades):.2f}")
+
+            # Trades table
+            st.divider()
+            st.subheader("📝 Détail des Trades de Production")
+            trades_df = create_trades_dataframe(trades)
+            st.dataframe(trades_df, use_container_width=True, height=400)
+        else:
+            st.info("Aucun trade fermé (SELL) avec P&L pour ce symbole.")
+
+        # Clear button
+        if st.button("🗑️ Effacer les graphiques de production"):
+            del st.session_state['production_data']
+            st.rerun()
 
 st.caption(f"DB: {DB_PATH}")
