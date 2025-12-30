@@ -1,20 +1,20 @@
 """
-Module de backtesting pour la stratégie TrendPhase
-Permet de simuler la stratégie sur des données historiques
+Module de backtesting pour les stratégies de trading
+Permet de simuler les stratégies sur des données historiques
 et d'analyser les performances
 """
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from binance import AsyncClient
 import pandas as pd
 import numpy as np
-from bot_core import TrendPhaseStrategy
+from strategies import create_strategy
 
 
 class BacktestEngine:
-    """Moteur de backtesting pour la stratégie TrendPhase"""
+    """Moteur de backtesting pour les stratégies de trading"""
 
     def __init__(
         self,
@@ -23,7 +23,9 @@ class BacktestEngine:
         allocation_pct: float = 10.0,
         testnet: bool = True,
         api_key: Optional[str] = None,
-        api_secret: Optional[str] = None
+        api_secret: Optional[str] = None,
+        strategy_name: str = "trend_phase",
+        strategy_params: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize backtest engine
@@ -35,6 +37,8 @@ class BacktestEngine:
             testnet: Use testnet API
             api_key: Binance API key
             api_secret: Binance API secret
+            strategy_name: Name of the strategy to use
+            strategy_params: Parameters for the strategy
         """
         self.symbol = symbol
         self.interval = interval
@@ -42,10 +46,14 @@ class BacktestEngine:
         self.testnet = testnet
         self.api_key = api_key
         self.api_secret = api_secret
+        self.strategy_name = strategy_name
+        self.strategy_params = strategy_params or {}
 
         # Strategy instance
-        self.strategy = TrendPhaseStrategy(
-            timeframe=interval
+        self.strategy = create_strategy(
+            strategy_name=strategy_name,
+            timeframe=interval,
+            **self.strategy_params
         )
 
         # Position tracking
@@ -279,8 +287,9 @@ class BacktestEngine:
         })
 
     def _record_breakout_levels(self, timestamp: int):
-        """Record current breakout levels"""
-        if self.strategy.buy_level is not None:
+        """Record current breakout levels (only for strategies that support it)"""
+        # Check if strategy has breakout levels (e.g., ThreeSwingsStrategy)
+        if hasattr(self.strategy, 'buy_level') and self.strategy.buy_level is not None:
             self.breakout_levels.append({
                 'type': 'BUY',
                 'level': self.strategy.buy_level,
@@ -288,7 +297,7 @@ class BacktestEngine:
                 'datetime': datetime.fromtimestamp(timestamp / 1000).isoformat()
             })
 
-        if self.strategy.sell_level is not None:
+        if hasattr(self.strategy, 'sell_level') and self.strategy.sell_level is not None:
             self.breakout_levels.append({
                 'type': 'SELL',
                 'level': self.strategy.sell_level,
@@ -319,8 +328,10 @@ class BacktestEngine:
         self.price_data = candles
 
         # Reset strategy
-        self.strategy = TrendPhaseStrategy(
-            timeframe=self.interval
+        self.strategy = create_strategy(
+            strategy_name=self.strategy_name,
+            timeframe=self.interval,
+            **self.strategy_params
         )
 
         # Reset position
@@ -489,7 +500,9 @@ async def run_backtest_async(
     initial_capital: float = 10000.0,
     testnet: bool = True,
     api_key: Optional[str] = None,
-    api_secret: Optional[str] = None
+    api_secret: Optional[str] = None,
+    strategy_name: str = "trend_phase",
+    strategy_params: Optional[Dict[str, Any]] = None
 ) -> Dict:
     """
     Convenience function to run a complete backtest
@@ -504,6 +517,8 @@ async def run_backtest_async(
         testnet: Use testnet API
         api_key: Binance API key
         api_secret: Binance API secret
+        strategy_name: Name of the strategy to use
+        strategy_params: Parameters for the strategy
 
     Returns:
         Complete backtest results with trades, statistics, and visualization data
@@ -514,7 +529,9 @@ async def run_backtest_async(
         allocation_pct=allocation_pct,
         testnet=testnet,
         api_key=api_key,
-        api_secret=api_secret
+        api_secret=api_secret,
+        strategy_name=strategy_name,
+        strategy_params=strategy_params
     )
 
     # Fetch historical data

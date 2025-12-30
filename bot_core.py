@@ -1,6 +1,6 @@
 """
 Module bot_core.py - Classe Bot réutilisable pour le trading multi-paires.
-Basé sur une stratégie de détection de phases de tendance avec EMA, RSI et ADX.
+Supporte plusieurs stratégies de trading configurables.
 """
 import asyncio
 import threading
@@ -8,7 +8,9 @@ from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from collections import deque
 from time import strftime, localtime
+from typing import Dict, Any, Optional
 from storage import insert_trade, update_position, clear_position, insert_log
+from strategies import create_strategy, get_strategy_class
 
 
 class TrendPhaseStrategy:
@@ -343,14 +345,16 @@ class TrendPhaseStrategy:
 
 class Bot:
     """
-    Bot de trading modulaire utilisant la stratégie 3 swings.
+    Bot de trading modulaire supportant plusieurs stratégies configurables.
     Peut être lancé dans un thread séparé et géré par le dashboard.
     """
 
     def __init__(self, symbol: str, interval: str = "1m",
                  risk_pct: float = 0.1, max_pos: float = 0.0,
                  testnet: bool = True, dry_run: bool = True,
-                 api_key: str = "", api_secret: str = ""):
+                 api_key: str = "", api_secret: str = "",
+                 strategy_name: str = "trend_phase",
+                 strategy_params: Optional[Dict[str, Any]] = None):
         self.symbol = symbol
         self.interval = interval
         self.risk_pct = risk_pct
@@ -359,15 +363,19 @@ class Bot:
         self.dry_run = dry_run
         self.api_key = api_key
         self.api_secret = api_secret
+        self.strategy_name = strategy_name
+        self.strategy_params = strategy_params or {}
 
         # État de la position
         self.pos_side = "FLAT"  # FLAT | LONG
         self.pos_qty = 0.0
         self.entry_price = 0.0
 
-        # Stratégie
-        self.strategy = TrendPhaseStrategy(
-            timeframe=interval
+        # Stratégie - Instanciée de manière configurable
+        self.strategy = create_strategy(
+            strategy_name=strategy_name,
+            timeframe=interval,
+            **self.strategy_params
         )
 
         # État du bot
@@ -389,7 +397,8 @@ class Bot:
         self._is_running = True
         self._thread = threading.Thread(target=self._run_in_thread, daemon=True)
         self._thread.start()
-        insert_log(self.symbol, "INFO", f"Bot démarré (testnet={self.testnet}, dry_run={self.dry_run})")
+        insert_log(self.symbol, "INFO",
+                  f"Bot démarré (stratégie={self.strategy_name}, testnet={self.testnet}, dry_run={self.dry_run})")
 
     def stop(self):
         """Arrête le bot."""
@@ -445,15 +454,11 @@ class Bot:
                 self.strategy.update(candle)
 
             status = self.strategy.get_status()
-            indicators = status.get('indicators', {})
 
             insert_log(self.symbol, "INFO",
-                      f"Stratégie initialisée: {status['structure'] or 'Non détectée'}")
-
-            if indicators.get('ema_short') and indicators.get('rsi') and indicators.get('adx'):
-                insert_log(self.symbol, "INFO",
-                          f"EMA: {indicators['ema_short']:.2f}/{indicators['ema_long']:.2f}, "
-                          f"RSI: {indicators['rsi']:.2f}, ADX: {indicators['adx']:.2f}")
+                      f"Stratégie '{self.strategy_name}' initialisée: "
+                      f"{status.get('structure') or 'Non détectée'}, "
+                      f"bougies chargées: {status.get('candles_count', 0)}")
 
         except Exception as e:
             insert_log(self.symbol, "ERROR", f"Erreur initialisation: {e}")

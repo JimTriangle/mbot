@@ -6,11 +6,12 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import asyncio
 from storage import (init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH,
-                     save_running_bot, remove_running_bot, fetch_running_bots)
+                     save_running_bot, remove_running_bot, fetch_running_bots, migrate_db)
 from bot_core import Bot
 from backtest import run_backtest_async
 from backtest_viz import create_backtest_chart, create_statistics_summary, create_trades_dataframe, create_production_chart
 from realtime_viz import get_bot_realtime_data, create_realtime_chart
+from strategies import get_all_strategies_info
 
 def _load_env_file(path: Path) -> bool:
     """Load key=value pairs from *path* into os.environ if not already set."""
@@ -71,6 +72,7 @@ if "bots" not in st.session_state:
     st.session_state["bots"] = {}  # symbol -> Bot instance
 
 init_db()
+migrate_db()  # Migrer la DB pour ajouter les colonnes de stratégie si nécessaire
 
 # ----- Restore Running Bots -----
 def restore_bots():
@@ -94,7 +96,9 @@ def restore_bots():
                 testnet=bool(bot_data["testnet"]),
                 dry_run=bool(bot_data["dry_run"]),
                 api_key=bot_data["api_key"],
-                api_secret=bot_data["api_secret"]
+                api_secret=bot_data["api_secret"],
+                strategy_name=bot_data.get("strategy_name", "trend_phase"),
+                strategy_params=bot_data.get("strategy_params", {})
             )
             bot.start()
             st.session_state["bots"][symbol] = bot
@@ -137,7 +141,66 @@ with st.sidebar:
     risk_pct = st.slider("Risque (% du solde quote par trade)", 1, 50, 10) / 100.0
     max_pos = st.number_input("Plafond position (quote, 0=illimité)", min_value=0.0, value=0.0, step=10.0)
 
+    # Sélection de stratégie
+    st.divider()
+    st.markdown("**Stratégie de trading**")
+    strategies_info = get_all_strategies_info()
+    strategy_names = list(strategies_info.keys())
+    strategy_labels = {k: f"{v['name']}" for k, v in strategies_info.items()}
+
+    selected_strategy = st.selectbox(
+        "Choisir une stratégie",
+        options=strategy_names,
+        format_func=lambda x: strategy_labels.get(x, x),
+        index=0
+    )
+
+    # Afficher la description de la stratégie sélectionnée
+    if selected_strategy:
+        strategy_info = strategies_info[selected_strategy]
+        with st.expander("ℹ️ Description de la stratégie", expanded=False):
+            st.markdown(strategy_info['description'])
+
+        # Paramètres de la stratégie
+        st.markdown("**Paramètres de la stratégie** (laisser par défaut pour commencer)")
+        strategy_params = {}
+        params_schema = strategy_info['parameters']
+
+        with st.expander("⚙️ Configurer les paramètres", expanded=False):
+            for param_name, param_config in params_schema.items():
+                param_type = param_config['type']
+                default_value = param_config['default']
+                description = param_config.get('description', '')
+
+                if param_type == 'int':
+                    min_val = param_config.get('min', 1)
+                    max_val = param_config.get('max', 100)
+                    strategy_params[param_name] = st.slider(
+                        description or param_name,
+                        min_value=int(min_val),
+                        max_value=int(max_val),
+                        value=int(default_value),
+                        key=f"param_{selected_strategy}_{param_name}"
+                    )
+                elif param_type == 'float':
+                    min_val = param_config.get('min', 0.0)
+                    max_val = param_config.get('max', 100.0)
+                    strategy_params[param_name] = st.slider(
+                        description or param_name,
+                        min_value=float(min_val),
+                        max_value=float(max_val),
+                        value=float(default_value),
+                        key=f"param_{selected_strategy}_{param_name}"
+                    )
+                elif param_type == 'bool':
+                    strategy_params[param_name] = st.checkbox(
+                        description or param_name,
+                        value=bool(default_value),
+                        key=f"param_{selected_strategy}_{param_name}"
+                    )
+
     # Per-bot mode selection
+    st.divider()
     st.markdown("**Mode du bot** (sélection spécifique à ce bot)")
     bot_mode = st.radio("Environnement", options=["TEST", "PROD"], horizontal=True, index=0)
     bot_dry = st.checkbox("DRY_RUN (journaliser sans ordres)", value=True)
@@ -151,34 +214,40 @@ with st.sidebar:
             testnet = (bot_mode == "TEST")
             dry_run = bot_dry
             bot = Bot(symbol=symbol, interval=interval, risk_pct=risk_pct, max_pos=max_pos,
-                      testnet=testnet, dry_run=dry_run, api_key=api_key, api_secret=api_sec)
+                      testnet=testnet, dry_run=dry_run, api_key=api_key, api_secret=api_sec,
+                      strategy_name=selected_strategy, strategy_params=strategy_params)
             bot.start()
             st.session_state["bots"][symbol] = bot
             # Sauvegarder dans la DB pour persistance
-            save_running_bot(symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_sec)
-            st.success(f"Bot {symbol} lancé en mode {'TESTNET' if testnet else 'PROD'} (dry_run={dry_run}).")
+            save_running_bot(symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_sec,
+                           strategy_name=selected_strategy, strategy_params=strategy_params)
+            st.success(f"Bot {symbol} lancé en mode {'TESTNET' if testnet else 'PROD'} "
+                      f"(stratégie={selected_strategy}, dry_run={dry_run}).")
 
 st.subheader("Bots actifs")
-hdr = st.columns([2,2,2,1,2,2])
+hdr = st.columns([2,1.5,1.5,2,1,2,2])
 hdr[0].markdown("**Symbole**")
 hdr[1].markdown("**Statut**")
-hdr[2].markdown("**Position**")
-hdr[3].markdown("**Stop**")
-hdr[4].markdown("**Relancer en TEST / PROD**")
-hdr[5].markdown("**Logs**")
+hdr[2].markdown("**Stratégie**")
+hdr[3].markdown("**Position**")
+hdr[4].markdown("**Stop**")
+hdr[5].markdown("**Relancer TEST/PROD**")
+hdr[6].markdown("**Logs**")
 
 to_restart = []
 
 for sym, bot in list(st.session_state["bots"].items()):
     status = "🟢 running" if bot.is_alive() else "🔴 stopped"
+    strategy_display = bot.strategy_name if hasattr(bot, 'strategy_name') else "trend_phase"
     pos = f"{bot.pos_side} {bot.pos_qty:.8f} @ {bot.entry_price:.4f}" if bot.pos_side=='LONG' else "FLAT"
-    cols = st.columns([2,2,2,1,2,2])
+    cols = st.columns([2,1.5,1.5,2,1,2,2])
     cols[0].write(sym)
     cols[1].write(status)
-    cols[2].write(pos)
+    cols[2].write(strategy_display)
+    cols[3].write(pos)
 
     # Stop
-    if cols[3].button("Stop", key=f"stop_{sym}"):
+    if cols[4].button("Stop", key=f"stop_{sym}"):
         try:
             bot.stop()
             remove_running_bot(sym)
@@ -186,35 +255,39 @@ for sym, bot in list(st.session_state["bots"].items()):
             st.error(f"Stop {sym} -> {e}")
 
     # Restart controls (per-bot mode)
-    with cols[4]:
+    with cols[5]:
         c1, c2 = st.columns(2)
         if c1.button("TEST", key=f"restart_test_{sym}"):
             try:
                 bot.stop()
                 new_bot = Bot(symbol=sym, interval=bot.interval, risk_pct=bot.risk_pct, max_pos=bot.max_pos,
-                              testnet=True, dry_run=True, api_key=bot.api_key, api_secret=bot.api_secret)
+                              testnet=True, dry_run=True, api_key=bot.api_key, api_secret=bot.api_secret,
+                              strategy_name=bot.strategy_name, strategy_params=bot.strategy_params)
                 new_bot.start()
                 st.session_state["bots"][sym] = new_bot
                 # Mettre à jour dans la DB
-                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, True, True, bot.api_key, bot.api_secret)
-                st.success(f"{sym} relancé en TESTNET (dry_run=True).")
+                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, True, True, bot.api_key, bot.api_secret,
+                               strategy_name=bot.strategy_name, strategy_params=bot.strategy_params)
+                st.success(f"{sym} relancé en TESTNET (stratégie={bot.strategy_name}, dry_run=True).")
             except Exception as e:
                 st.error(f"Relance TEST {sym}: {e}")
         if c2.button("PROD", key=f"restart_prod_{sym}"):
             try:
                 bot.stop()
                 new_bot = Bot(symbol=sym, interval=bot.interval, risk_pct=bot.risk_pct, max_pos=bot.max_pos,
-                              testnet=False, dry_run=False, api_key=bot.api_key, api_secret=bot.api_secret)
+                              testnet=False, dry_run=False, api_key=bot.api_key, api_secret=bot.api_secret,
+                              strategy_name=bot.strategy_name, strategy_params=bot.strategy_params)
                 new_bot.start()
                 st.session_state["bots"][sym] = new_bot
                 # Mettre à jour dans la DB
-                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, False, False, bot.api_key, bot.api_secret)
-                st.success(f"{sym} relancé en PROD (dry_run=False).")
+                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, False, False, bot.api_key, bot.api_secret,
+                               strategy_name=bot.strategy_name, strategy_params=bot.strategy_params)
+                st.success(f"{sym} relancé en PROD (stratégie={bot.strategy_name}, dry_run=False).")
             except Exception as e:
                 st.error(f"Relance PROD {sym}: {e}")
 
     # Logs view
-    if cols[5].button("Voir", key=f"logs_{sym}"):
+    if cols[6].button("Voir", key=f"logs_{sym}"):
         st.session_state["view_logs"] = sym
 
 st.divider()
@@ -298,7 +371,62 @@ with tab_test:
             bt_allocation_pct = st.slider("Allocation par trade (% du capital disponible)", min_value=1.0, max_value=100.0, value=10.0, step=1.0)
             bt_capital = st.number_input("Capital initial (USDT)", min_value=100.0, value=10000.0, step=100.0)
 
+        # Sélection de stratégie pour le backtest
+        st.divider()
+        st.markdown("**Stratégie à tester**")
+        bt_strategies_info = get_all_strategies_info()
+        bt_strategy_names = list(bt_strategies_info.keys())
+        bt_strategy_labels = {k: f"{v['name']}" for k, v in bt_strategies_info.items()}
+
+        bt_selected_strategy = st.selectbox(
+            "Choisir une stratégie à tester",
+            options=bt_strategy_names,
+            format_func=lambda x: bt_strategy_labels.get(x, x),
+            index=0,
+            key="bt_strategy"
+        )
+
+        # Paramètres de la stratégie pour le backtest
+        bt_strategy_params = {}
+        if bt_selected_strategy:
+            bt_strategy_info = bt_strategies_info[bt_selected_strategy]
+            params_schema = bt_strategy_info['parameters']
+
+            with st.expander("⚙️ Paramètres de la stratégie (optionnel)", expanded=False):
+                for param_name, param_config in params_schema.items():
+                    param_type = param_config['type']
+                    default_value = param_config['default']
+                    description = param_config.get('description', '')
+
+                    if param_type == 'int':
+                        min_val = param_config.get('min', 1)
+                        max_val = param_config.get('max', 100)
+                        bt_strategy_params[param_name] = st.slider(
+                            description or param_name,
+                            min_value=int(min_val),
+                            max_value=int(max_val),
+                            value=int(default_value),
+                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                        )
+                    elif param_type == 'float':
+                        min_val = param_config.get('min', 0.0)
+                        max_val = param_config.get('max', 100.0)
+                        bt_strategy_params[param_name] = st.slider(
+                            description or param_name,
+                            min_value=float(min_val),
+                            max_value=float(max_val),
+                            value=float(default_value),
+                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                        )
+                    elif param_type == 'bool':
+                        bt_strategy_params[param_name] = st.checkbox(
+                            description or param_name,
+                            value=bool(default_value),
+                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                        )
+
         # Date range calculation
+        st.divider()
         end_date = datetime.now()
         start_date = end_date - timedelta(days=bt_days)
 
@@ -319,12 +447,14 @@ with tab_test:
                     initial_capital=bt_capital,
                     testnet=default_testnet,
                     api_key=api_key,
-                    api_secret=api_sec
+                    api_secret=api_sec,
+                    strategy_name=bt_selected_strategy,
+                    strategy_params=bt_strategy_params
                 ))
 
                 # Store results in session state
                 st.session_state['backtest_results'] = results
-                st.success("✅ Simulation terminée avec succès!")
+                st.success(f"✅ Simulation terminée avec succès ! (Stratégie: {bt_selected_strategy})")
 
             except Exception as e:
                 st.error(f"❌ Erreur lors du backtest: {str(e)}")

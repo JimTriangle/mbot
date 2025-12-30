@@ -3,9 +3,10 @@ Module de gestion de la base de données SQLite pour le dashboard multi-bots.
 Stocke les trades, positions et logs de tous les bots.
 """
 import sqlite3
+import json
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 DB_PATH = Path(__file__).parent / "bot_data.db"
 
@@ -67,10 +68,44 @@ def init_db():
             dry_run INTEGER NOT NULL,
             api_key TEXT NOT NULL,
             api_secret TEXT NOT NULL,
+            strategy_name TEXT NOT NULL DEFAULT 'trend_phase',
+            strategy_params TEXT,
             started_at TEXT NOT NULL,
             last_heartbeat TEXT
         )
     """)
+
+    conn.commit()
+    conn.close()
+
+
+def migrate_db():
+    """
+    Migre la base de données existante pour ajouter les colonnes de stratégie.
+    Cette fonction peut être appelée en toute sécurité même si les colonnes existent déjà.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Vérifier si les colonnes strategy_name et strategy_params existent
+    c.execute("PRAGMA table_info(running_bots)")
+    columns = [col[1] for col in c.fetchall()]
+
+    # Ajouter strategy_name si elle n'existe pas
+    if 'strategy_name' not in columns:
+        c.execute("""
+            ALTER TABLE running_bots
+            ADD COLUMN strategy_name TEXT NOT NULL DEFAULT 'trend_phase'
+        """)
+        print("✓ Colonne 'strategy_name' ajoutée à la table running_bots")
+
+    # Ajouter strategy_params si elle n'existe pas
+    if 'strategy_params' not in columns:
+        c.execute("""
+            ALTER TABLE running_bots
+            ADD COLUMN strategy_params TEXT
+        """)
+        print("✓ Colonne 'strategy_params' ajoutée à la table running_bots")
 
     conn.commit()
     conn.close()
@@ -207,18 +242,24 @@ def fetch_logs(symbol: Optional[str] = None, limit: int = 200) -> List[Dict]:
 
 
 def save_running_bot(symbol: str, interval: str, risk_pct: float, max_pos: float,
-                     testnet: bool, dry_run: bool, api_key: str, api_secret: str):
+                     testnet: bool, dry_run: bool, api_key: str, api_secret: str,
+                     strategy_name: str = "trend_phase", strategy_params: Optional[Dict[str, Any]] = None):
     """Enregistre un bot en cours d'exécution dans la base de données."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     ts = datetime.now().isoformat()
 
+    # Sérialiser les paramètres de stratégie en JSON
+    strategy_params_json = json.dumps(strategy_params) if strategy_params else None
+
     c.execute("""
         INSERT OR REPLACE INTO running_bots
-        (symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_secret, started_at, last_heartbeat)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (symbol, interval, risk_pct, max_pos, int(testnet), int(dry_run), api_key, api_secret, ts, ts))
+        (symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_secret,
+         strategy_name, strategy_params, started_at, last_heartbeat)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (symbol, interval, risk_pct, max_pos, int(testnet), int(dry_run), api_key, api_secret,
+          strategy_name, strategy_params_json, ts, ts))
 
     conn.commit()
     conn.close()
@@ -263,4 +304,17 @@ def fetch_running_bots() -> List[Dict]:
     rows = c.fetchall()
     conn.close()
 
-    return [dict(row) for row in rows]
+    # Désérialiser les paramètres de stratégie
+    bots = []
+    for row in rows:
+        bot = dict(row)
+        if bot.get('strategy_params'):
+            try:
+                bot['strategy_params'] = json.loads(bot['strategy_params'])
+            except json.JSONDecodeError:
+                bot['strategy_params'] = {}
+        else:
+            bot['strategy_params'] = {}
+        bots.append(bot)
+
+    return bots
