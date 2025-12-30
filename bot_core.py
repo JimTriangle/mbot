@@ -314,9 +314,8 @@ class TrendPhaseStrategy:
             self.signal_count["BUY"] += 1
             return "BUY"
 
-        # Début de tendance baissière OU fin de tendance haussière
-        if (self.strong_down_trend and not self.previous_strong_down_trend) or \
-           (self.previous_strong_up_trend and not self.strong_up_trend):
+        # Fin de tendance haussière uniquement
+        if self.previous_strong_up_trend and not self.strong_up_trend:
             self.last_signal = "SELL"
             self.signal_count["SELL"] += 1
             return "SELL"
