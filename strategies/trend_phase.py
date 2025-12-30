@@ -35,7 +35,7 @@ class TrendPhaseStrategy(BaseStrategy):
                 - adx_smoothing: Lissage ADX (défaut: 14)
                 - adx_trend_threshold: Seuil de tendance ADX (défaut: 25)
                 - rsi_up_threshold: Seuil RSI haussier (défaut: 55)
-                - rsi_down_threshold: Seuil RSI baissier (défaut: 35)
+                - rsi_down_threshold: Seuil RSI baissier (défaut: 30)
                 - max_candles: Nombre max de bougies à garder (défaut: 200)
         """
         super().__init__(timeframe, **params)
@@ -48,7 +48,7 @@ class TrendPhaseStrategy(BaseStrategy):
         self.adx_smoothing = params.get('adx_smoothing', 14)
         self.adx_trend_threshold = params.get('adx_trend_threshold', 25)
         self.rsi_up_threshold = params.get('rsi_up_threshold', 55)
-        self.rsi_down_threshold = params.get('rsi_down_threshold', 35)
+        self.rsi_down_threshold = params.get('rsi_down_threshold', 30)
         self.max_candles = params.get('max_candles', 200)
 
         # Données
@@ -303,9 +303,8 @@ class TrendPhaseStrategy(BaseStrategy):
             self.signal_count["BUY"] += 1
             return "BUY"
 
-        # Début de tendance baissière OU fin de tendance haussière
-        if (self.strong_down_trend and not self.previous_strong_down_trend) or \
-           (self.previous_strong_up_trend and not self.strong_up_trend):
+        # Fin de tendance haussière uniquement (pas début de baisse)
+        if self.previous_strong_up_trend and not self.strong_up_trend:
             self.last_signal = "SELL"
             self.signal_count["SELL"] += 1
             return "SELL"
@@ -386,8 +385,8 @@ class TrendPhaseStrategy(BaseStrategy):
             },
             'rsi_down_threshold': {
                 'type': 'float',
-                'default': 35.0,
-                'min': 30.0,
+                'default': 30.0,
+                'min': 20.0,
                 'max': 50.0,
                 'description': 'Seuil RSI pour tendance baissière'
             },
