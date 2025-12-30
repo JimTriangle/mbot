@@ -20,8 +20,7 @@ class BacktestEngine:
         self,
         symbol: str,
         interval: str,
-        risk_pct: float = 1.0,
-        max_pos: float = 1000.0,
+        allocation_pct: float = 10.0,
         testnet: bool = True,
         api_key: Optional[str] = None,
         api_secret: Optional[str] = None
@@ -32,16 +31,14 @@ class BacktestEngine:
         Args:
             symbol: Trading pair (ex: BTCUSDT)
             interval: Timeframe (1m, 5m, 15m, 1h, etc.)
-            risk_pct: Percentage of capital to risk per trade
-            max_pos: Maximum position size in quote currency
+            allocation_pct: Percentage of available capital to allocate per trade (e.g., 10.0 = 10%)
             testnet: Use testnet API
             api_key: Binance API key
             api_secret: Binance API secret
         """
         self.symbol = symbol
         self.interval = interval
-        self.risk_pct = risk_pct
-        self.max_pos = max_pos
+        self.allocation_pct = allocation_pct
         self.testnet = testnet
         self.api_key = api_key
         self.api_secret = api_secret
@@ -136,14 +133,10 @@ class BacktestEngine:
             await client.close_connection()
 
     def _calculate_position_size(self, price: float) -> float:
-        """Calculate position size based on risk and capital"""
-        # Simple approach: use risk_pct of current capital
-        risk_amount = self.current_capital * (self.risk_pct / 100.0)
-        qty = risk_amount / price
-
-        # Cap at max position value
-        max_qty = self.max_pos / price
-        qty = min(qty, max_qty)
+        """Calculate position size based on allocation percentage of available capital"""
+        # Simple allocation: use allocation_pct of current capital
+        allocation_amount = self.current_capital * (self.allocation_pct / 100.0)
+        qty = allocation_amount / price
 
         return qty
 
@@ -433,8 +426,7 @@ async def run_backtest_async(
     interval: str,
     start_date: datetime,
     end_date: datetime,
-    risk_pct: float = 1.0,
-    max_pos: float = 1000.0,
+    allocation_pct: float = 10.0,
     initial_capital: float = 10000.0,
     testnet: bool = True,
     api_key: Optional[str] = None,
@@ -448,8 +440,7 @@ async def run_backtest_async(
         interval: Timeframe
         start_date: Start date
         end_date: End date
-        risk_pct: Risk percentage per trade
-        max_pos: Maximum position size
+        allocation_pct: Percentage of available capital to allocate per trade
         initial_capital: Starting capital
         testnet: Use testnet API
         api_key: Binance API key
@@ -461,8 +452,7 @@ async def run_backtest_async(
     engine = BacktestEngine(
         symbol=symbol,
         interval=interval,
-        risk_pct=risk_pct,
-        max_pos=max_pos,
+        allocation_pct=allocation_pct,
         testnet=testnet,
         api_key=api_key,
         api_secret=api_secret

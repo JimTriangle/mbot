@@ -19,8 +19,7 @@ async def test_backtest():
     interval = "1h"
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)  # 7 jours de données
-    risk_pct = 1.0
-    max_pos = 1000.0
+    allocation_pct = 10.0
     initial_capital = 10000.0
 
     # Get API credentials
@@ -36,8 +35,7 @@ async def test_backtest():
     print(f"⏰ Intervalle: {interval}")
     print(f"📅 Période: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}")
     print(f"💰 Capital initial: ${initial_capital:.2f}")
-    print(f"📈 Risque par trade: {risk_pct}%")
-    print(f"🔒 Position max: ${max_pos:.2f}")
+    print(f"📊 Allocation par trade: {allocation_pct}% du capital disponible")
     print("-" * 60)
 
     try:
@@ -48,8 +46,7 @@ async def test_backtest():
             interval=interval,
             start_date=start_date,
             end_date=end_date,
-            risk_pct=risk_pct,
-            max_pos=max_pos,
+            allocation_pct=allocation_pct,
             initial_capital=initial_capital,
             testnet=True,
             api_key=api_key,
