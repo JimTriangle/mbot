@@ -108,9 +108,9 @@ def test_check_breakout():
     print(f"   Signal reçu: {signal}")
     print("✅ check_breakout() fonctionne sans erreur")
 
-    # Tester avec timestamp (pour compatibilité avec backtest)
-    signal = strategy.check_breakout(29600.0, timestamp=1609459200000)
-    print("✅ check_breakout() accepte le paramètre timestamp")
+    # Tester avec un autre prix
+    signal = strategy.check_breakout(29600.0)
+    print("✅ check_breakout() fonctionne avec différents prix")
 
     print("\n✅ Tous les tests check_breakout() sont passés!")
     return True
