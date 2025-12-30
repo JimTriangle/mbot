@@ -6,6 +6,7 @@ Utilise Plotly pour créer des graphiques interactifs
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import numpy as np
 from typing import Dict, List
 from datetime import datetime
 
@@ -225,11 +226,74 @@ def create_backtest_chart(results: Dict) -> go.Figure:
             xanchor="right",
             x=1
         ),
-        template='plotly_dark'
+        template='plotly_dark',
+        # Preserve UI state during interactions
+        uirevision='constant'
     )
 
-    # Remove rangeslider for cleaner look
-    fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+    # Calculate reasonable Y-axis range to handle outliers
+    # This prevents a single extreme candle from making the rest of the chart unreadable
+    all_highs = df['high'].values
+    all_lows = df['low'].values
+
+    # Use percentiles to identify reasonable price range
+    # This excludes extreme outliers from the initial view
+    p1 = np.percentile(all_highs, 1)   # 1st percentile
+    p99 = np.percentile(all_highs, 99)  # 99th percentile
+    l1 = np.percentile(all_lows, 1)
+    l99 = np.percentile(all_lows, 99)
+
+    # Determine if there are extreme outliers (values > 3x the 99th percentile range)
+    price_range = p99 - l1
+    max_high = np.max(all_highs)
+    has_extreme_outlier = max_high > (p99 + 2 * price_range)
+
+    if has_extreme_outlier:
+        # If we have extreme outliers, set a fixed range based on percentiles
+        # Add 5% margin for better visibility
+        margin = price_range * 0.05
+        y_min = l1 - margin
+        y_max = p99 + margin
+
+        fig.update_yaxes(
+            range=[y_min, y_max],
+            fixedrange=False,  # Allow manual zoom
+            row=1,
+            col=1
+        )
+
+        # Add annotation to inform user about outliers
+        fig.add_annotation(
+            text="⚠️ Valeurs extrêmes détectées - Échelle ajustée. Zoomez ou utilisez 'Autoscale' pour voir toutes les données",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.98,
+            xanchor="center",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=10, color="orange"),
+            bgcolor="rgba(0,0,0,0.6)",
+            bordercolor="orange",
+            borderwidth=1,
+            row=1,
+            col=1
+        )
+    else:
+        # No extreme outliers, use auto-ranging
+        fig.update_yaxes(
+            autorange=True,
+            fixedrange=False,
+            row=1,
+            col=1
+        )
+
+    # Configure X-axis
+    fig.update_xaxes(
+        rangeslider_visible=False,
+        row=1,
+        col=1
+    )
 
     return fig
 
