@@ -56,6 +56,22 @@ def init_db():
         )
     """)
 
+    # Table des bots en cours d'exécution
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS running_bots (
+            symbol TEXT PRIMARY KEY,
+            interval TEXT NOT NULL,
+            risk_pct REAL NOT NULL,
+            max_pos REAL NOT NULL,
+            testnet INTEGER NOT NULL,
+            dry_run INTEGER NOT NULL,
+            api_key TEXT NOT NULL,
+            api_secret TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            last_heartbeat TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -183,6 +199,66 @@ def fetch_logs(symbol: Optional[str] = None, limit: int = 200) -> List[Dict]:
             ORDER BY ts DESC
             LIMIT ?
         """, (limit,))
+
+    rows = c.fetchall()
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def save_running_bot(symbol: str, interval: str, risk_pct: float, max_pos: float,
+                     testnet: bool, dry_run: bool, api_key: str, api_secret: str):
+    """Enregistre un bot en cours d'exécution dans la base de données."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    ts = datetime.now().isoformat()
+
+    c.execute("""
+        INSERT OR REPLACE INTO running_bots
+        (symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_secret, started_at, last_heartbeat)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (symbol, interval, risk_pct, max_pos, int(testnet), int(dry_run), api_key, api_secret, ts, ts))
+
+    conn.commit()
+    conn.close()
+
+
+def update_bot_heartbeat(symbol: str):
+    """Met à jour le heartbeat d'un bot en cours d'exécution."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    ts = datetime.now().isoformat()
+
+    c.execute("""
+        UPDATE running_bots
+        SET last_heartbeat = ?
+        WHERE symbol = ?
+    """, (ts, symbol))
+
+    conn.commit()
+    conn.close()
+
+
+def remove_running_bot(symbol: str):
+    """Supprime un bot de la liste des bots en cours d'exécution."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("DELETE FROM running_bots WHERE symbol = ?", (symbol,))
+
+    conn.commit()
+    conn.close()
+
+
+def fetch_running_bots() -> List[Dict]:
+    """Récupère tous les bots censés être en cours d'exécution."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM running_bots ORDER BY symbol")
 
     rows = c.fetchall()
     conn.close()
