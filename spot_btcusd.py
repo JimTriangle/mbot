@@ -22,7 +22,7 @@ PIVOT_LEFT = 3
 PIVOT_RIGHT = 3
 
 #  NOUVEAU : Strategie de BREAKOUT
-USE_BREAKOUT_STRATEGY = Tru# Trade sur breakout du dernier pivot
+USE_BREAKOUT_STRATEGY = True # Trade sur breakout du dernier pivot
 BREAKOUT_THRESHOLD = 0.05  # 0.05% au-dessus/en-dessous du pivot
 
 # Filtres
