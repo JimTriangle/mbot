@@ -274,6 +274,9 @@ sur les **mêmes graphiques que vous verriez en production**. Cela vous permet d
 
 Les graphiques interactifs montrent les chandeliers, les points d'entrée/sortie, et le P&L cumulé
 exactement comme vous les verriez en trading réel.
+
+ℹ️ **Note importante :** Les données historiques sont **toujours récupérées depuis l'API Binance de production**
+pour garantir que vous testez sur des données réelles de marché, peu importe votre mode testnet/production.
 """)
 
 with st.expander("⚙️ Configuration du Backtest", expanded=True):
@@ -463,10 +466,11 @@ if prod_symbol and load_production:
                 from binance import AsyncClient
 
                 async def fetch_prod_data():
+                    # ALWAYS use production API for real historical price data
                     client = await AsyncClient.create(
                         api_key=api_key,
                         api_secret=api_sec,
-                        testnet=default_testnet
+                        testnet=False  # Force production for real market data
                     )
                     try:
                         start_ms = int(chart_start.timestamp() * 1000)
