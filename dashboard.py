@@ -2,9 +2,63 @@ import os, time
 import streamlit as st
 import pandas as pd
 import numpy as np
-
+from pathlib import Path
 from storage import init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH
 from bot_core import Bot
+
+def _load_env_file(path: Path) -> bool:
+    """Load key=value pairs from *path* into os.environ if not already set."""
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if not key:
+                    continue
+                # Remove inline comments that are not quoted
+                if " #" in value and not (value.startswith("\"") or value.startswith("'")):
+                    value = value.split(" #", 1)[0].strip()
+                if (value.startswith("\"") and value.endswith("\"")) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+        return True
+    except OSError:
+        return False
+
+
+def load_env_from_candidates() -> None:
+    """Load environment variables from common .env locations."""
+    candidates = []
+    env_file = os.getenv("ENV_FILE")
+    if env_file:
+        candidates.append(Path(env_file))
+
+    script_dir = Path(__file__).resolve().parent
+    candidates.append(Path.cwd() / ".env")
+    candidates.append(script_dir / ".env")
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        # Deduplicate while preserving order
+        key = candidate.resolve() if candidate.exists() else candidate
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            _load_env_file(candidate)
+
+
+load_env_from_candidates()
 
 # ----- App State -----
 if "bots" not in st.session_state:
