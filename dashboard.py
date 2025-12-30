@@ -3,9 +3,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from datetime import datetime, timedelta
+import asyncio
 from storage import (init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH,
                      save_running_bot, remove_running_bot, fetch_running_bots)
 from bot_core import Bot
+from backtest import run_backtest_async
+from backtest_viz import create_backtest_chart, create_statistics_summary, create_trades_dataframe
 
 def _load_env_file(path: Path) -> bool:
     """Load key=value pairs from *path* into os.environ if not already set."""
@@ -255,5 +259,116 @@ st.subheader("Logs récents")
 symbol_filter = st.text_input("Filtrer par symbole (optionnel)", value=os.getenv("SYMBOL",""))
 logs = fetch_logs(symbol_filter if symbol_filter else None, limit=200)
 st.dataframe(pd.DataFrame(logs))
+
+# ---- Backtesting Section ----
+st.divider()
+st.header("🔬 Backtesting - Simulation Historique")
+st.markdown("""
+Testez votre stratégie 3 Swings sur des données historiques pour analyser les performances
+et identifier les points d'achat/vente. Cette simulation vous permet de valider la stratégie
+avant de la déployer en production.
+""")
+
+with st.expander("⚙️ Configuration du Backtest", expanded=True):
+    bt_col1, bt_col2 = st.columns(2)
+
+    with bt_col1:
+        bt_symbol = st.text_input("Symbole pour backtest", "BTCUSDT", key="bt_symbol")
+        bt_interval = st.selectbox("Intervalle", ["1m","3m","5m","15m","30m","1h","4h","1d"], index=4, key="bt_interval")
+        bt_days = st.slider("Période (jours)", min_value=1, max_value=90, value=30)
+
+    with bt_col2:
+        bt_risk_pct = st.slider("Risque (% du capital)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+        bt_max_pos = st.number_input("Position max (USDT, 0=illimité)", min_value=0.0, value=1000.0, step=100.0)
+        bt_capital = st.number_input("Capital initial (USDT)", min_value=100.0, value=10000.0, step=100.0)
+
+    # Date range calculation
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=bt_days)
+
+    st.info(f"📅 Période de test: {start_date.strftime('%Y-%m-%d %H:%M')} → {end_date.strftime('%Y-%m-%d %H:%M')}")
+
+    run_backtest = st.button("🚀 Lancer la Simulation", type="primary", use_container_width=True)
+
+if run_backtest:
+    with st.spinner("⏳ Téléchargement des données et exécution du backtest..."):
+        try:
+            # Run backtest asynchronously
+            results = asyncio.run(run_backtest_async(
+                symbol=bt_symbol,
+                interval=bt_interval,
+                start_date=start_date,
+                end_date=end_date,
+                risk_pct=bt_risk_pct,
+                max_pos=bt_max_pos,
+                initial_capital=bt_capital,
+                testnet=default_testnet,
+                api_key=api_key,
+                api_secret=api_sec
+            ))
+
+            # Store results in session state
+            st.session_state['backtest_results'] = results
+            st.success("✅ Simulation terminée avec succès!")
+
+        except Exception as e:
+            st.error(f"❌ Erreur lors du backtest: {str(e)}")
+            st.exception(e)
+
+# Display backtest results if available
+if 'backtest_results' in st.session_state:
+    results = st.session_state['backtest_results']
+
+    st.divider()
+    st.subheader("📊 Résultats de la Simulation")
+
+    # Display statistics summary
+    st.markdown(create_statistics_summary(results['statistics']), unsafe_allow_html=True)
+
+    # Display interactive chart
+    st.divider()
+    st.subheader("📈 Graphique Interactif")
+    fig = create_backtest_chart(results)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Display trades table
+    st.divider()
+    st.subheader("📝 Détail des Trades")
+
+    trades_df = create_trades_dataframe(results['trades'])
+    if not trades_df.empty:
+        # Add filters
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            filter_type = st.multiselect(
+                "Filtrer par type",
+                options=["BUY", "SELL"],
+                default=["BUY", "SELL"]
+            )
+
+        # Apply filters
+        if filter_type:
+            mask = trades_df['Type'].isin(filter_type) if 'Type' in trades_df.columns else [True] * len(trades_df)
+            filtered_df = trades_df[mask]
+        else:
+            filtered_df = trades_df
+
+        st.dataframe(filtered_df, use_container_width=True, height=400)
+
+        # Download button
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="💾 Télécharger les trades (CSV)",
+            data=csv,
+            file_name=f"backtest_{bt_symbol}_{start_date.strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Aucun trade exécuté durant la simulation.")
+
+    # Clear results button
+    if st.button("🗑️ Effacer les résultats"):
+        del st.session_state['backtest_results']
+        st.rerun()
 
 st.caption(f"DB: {DB_PATH}")
