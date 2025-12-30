@@ -326,8 +326,28 @@ if 'backtest_results' in st.session_state:
     # Display interactive chart
     st.divider()
     st.subheader("📈 Graphique Interactif")
+    st.info("💡 **Astuce de Zoom :**\n"
+            "- Le graphique ajuste automatiquement l'échelle pour éviter que les valeurs extrêmes ne rendent le reste illisible\n"
+            "- Cliquez et glissez sur le graphique pour zoomer sur une zone spécifique\n"
+            "- Double-cliquez n'importe où pour réinitialiser le zoom et voir toutes les données\n"
+            "- Utilisez les boutons de la barre d'outils (en haut à droite) pour contrôler le zoom")
     fig = create_backtest_chart(results)
-    st.plotly_chart(fig, use_container_width=True)
+
+    # Configure Plotly chart with toolbar options for better zoom control
+    plotly_config = {
+        'displayModeBar': True,
+        'displaylogo': False,
+        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+        'toImageButtonOptions': {
+            'format': 'png',
+            'filename': f'backtest_{bt_symbol}',
+            'height': 800,
+            'width': 1400,
+            'scale': 2
+        }
+    }
+
+    st.plotly_chart(fig, use_container_width=True, config=plotly_config)
 
     # Display trades table
     st.divider()
