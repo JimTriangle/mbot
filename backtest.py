@@ -351,7 +351,7 @@ class BacktestEngine:
 
             # Check for signals (with cooldown)
             if timestamp - self.last_signal_time >= self.signal_cooldown:
-                signal = self.strategy.check_breakout(close_price, timestamp)
+                signal = self.strategy.check_breakout(close_price)
 
                 if signal == "BUY":
                     self._execute_buy(close_price, timestamp)
