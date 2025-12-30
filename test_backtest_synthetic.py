@@ -48,8 +48,7 @@ def test_backtest_synthetic():
     engine = BacktestEngine(
         symbol="BTCUSDT",
         interval="1m",
-        risk_pct=1.0,
-        max_pos=1000.0,
+        allocation_pct=10.0,
         testnet=True
     )
 

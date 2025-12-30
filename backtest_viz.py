@@ -242,97 +242,73 @@ def create_statistics_summary(stats: Dict) -> str:
         stats: Statistics dictionary from BacktestEngine
 
     Returns:
-        Formatted HTML string with statistics
+        Formatted string with statistics (plain text for Streamlit)
     """
     if stats['total_trades'] == 0:
-        return "<p>Aucun trade exécuté durant le backtest.</p>"
+        return "Aucun trade exécuté durant le backtest."
 
-    html = f"""
-    <div style='background-color: #1e1e1e; padding: 20px; border-radius: 10px;'>
-        <h3 style='color: #2196F3;'>📊 Résumé des Performances</h3>
+    # Build summary as plain text for better compatibility
+    summary = f"""
+### Résumé des Performances
 
-        <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;'>
-            <div>
-                <h4 style='color: #26a69a;'>📈 Statistiques de Trading</h4>
-                <ul style='list-style: none; padding: 0;'>
-                    <li><strong>Total d'ordres:</strong> {stats['total_trades']}</li>
-                    <li><strong>Ordres d'achat:</strong> {stats['buy_orders']}</li>
-                    <li><strong>Ordres de vente:</strong> {stats['sell_orders']}</li>
-                    <li><strong>Trades gagnants:</strong> <span style='color: #00ff00;'>{stats['winning_trades']}</span></li>
-                    <li><strong>Trades perdants:</strong> <span style='color: #ff0000;'>{stats['losing_trades']}</span></li>
-                    <li><strong>Win Rate:</strong> <span style='color: {"#00ff00" if stats["win_rate"] >= 50 else "#ff9800"};'>{stats['win_rate']:.2f}%</span></li>
-                </ul>
-            </div>
+#### Statistiques de Trading
+- **Total d'ordres:** {stats['total_trades']}
+- **Ordres d'achat:** {stats['buy_orders']}
+- **Ordres de vente:** {stats['sell_orders']}
+- **Trades gagnants:** {stats['winning_trades']} :green_circle:
+- **Trades perdants:** {stats['losing_trades']} :red_circle:
+- **Win Rate:** {stats['win_rate']:.2f}% {'✅' if stats['win_rate'] >= 50 else '⚠️'}
 
-            <div>
-                <h4 style='color: #2196F3;'>💰 Profit & Loss</h4>
-                <ul style='list-style: none; padding: 0;'>
-                    <li><strong>P&L Total:</strong> <span style='color: {"#00ff00" if stats["total_pnl"] >= 0 else "#ff0000"};'>${stats['total_pnl']:.2f}</span></li>
-                    <li><strong>Rendement:</strong> <span style='color: {"#00ff00" if stats["return_pct"] >= 0 else "#ff0000"};'>{stats['return_pct']:.2f}%</span></li>
-                    <li><strong>Capital Final:</strong> ${stats['final_capital']:.2f}</li>
-                    <li><strong>Gain Moyen:</strong> <span style='color: #00ff00;'>${stats['avg_win']:.2f}</span></li>
-                    <li><strong>Perte Moyenne:</strong> <span style='color: #ff0000;'>${stats['avg_loss']:.2f}</span></li>
-                    <li><strong>Plus Grand Gain:</strong> <span style='color: #00ff00;'>${stats['largest_win']:.2f}</span></li>
-                    <li><strong>Plus Grande Perte:</strong> <span style='color: #ff0000;'>${stats['largest_loss']:.2f}</span></li>
-                </ul>
-            </div>
+#### Profit & Loss
+- **P&L Total:** ${stats['total_pnl']:.2f} {'📈' if stats['total_pnl'] >= 0 else '📉'}
+- **Rendement:** {stats['return_pct']:.2f}% {'✅' if stats['return_pct'] >= 0 else '❌'}
+- **Capital Final:** ${stats['final_capital']:.2f}
+- **Gain Moyen:** ${stats['avg_win']:.2f}
+- **Perte Moyenne:** ${stats['avg_loss']:.2f}
+- **Plus Grand Gain:** ${stats['largest_win']:.2f}
+- **Plus Grande Perte:** ${stats['largest_loss']:.2f}
 
-            <div>
-                <h4 style='color: #ff9800;'>⚠️ Gestion du Risque</h4>
-                <ul style='list-style: none; padding: 0;'>
-                    <li><strong>Max Drawdown:</strong> <span style='color: #ff0000;'>${stats['max_drawdown']:.2f}</span></li>
-                    <li><strong>Max Drawdown %:</strong> <span style='color: #ff0000;'>{stats['max_drawdown_pct']:.2f}%</span></li>
-                    <li><strong>Profit Factor:</strong> <span style='color: {"#00ff00" if stats["profit_factor"] >= 1 else "#ff0000"};'>{stats['profit_factor']:.2f}</span></li>
-                </ul>
-            </div>
+#### Gestion du Risque
+- **Max Drawdown:** ${stats['max_drawdown']:.2f}
+- **Max Drawdown %:** {stats['max_drawdown_pct']:.2f}%
+- **Profit Factor:** {stats['profit_factor']:.2f} {'✅' if stats['profit_factor'] >= 1 else '❌'}
 
-            <div>
-                <h4 style='color: #9c27b0;'>⏱️ Temps de Détention</h4>
-                <ul style='list-style: none; padding: 0;'>
-                    <li><strong>Temps moyen:</strong> {stats['avg_hold_time_hours']:.2f} heures</li>
-                </ul>
-            </div>
-        </div>
+#### Temps de Détention
+- **Temps moyen:** {stats['avg_hold_time_hours']:.2f} heures
 
-        <div style='margin-top: 20px; padding: 15px; background-color: #2a2a2a; border-radius: 5px;'>
-            <p style='margin: 0;'><strong>💡 Interprétation:</strong></p>
-            <ul style='margin-top: 10px;'>
-    """
+---
+
+**Interprétation:**
+"""
 
     # Add interpretation based on metrics
     if stats['win_rate'] >= 60:
-        html += "<li>✅ Excellent taux de réussite (≥60%)</li>"
+        summary += "\n- ✅ Excellent taux de réussite (≥60%)"
     elif stats['win_rate'] >= 50:
-        html += "<li>✔️ Bon taux de réussite (≥50%)</li>"
+        summary += "\n- ✔️ Bon taux de réussite (≥50%)"
     else:
-        html += "<li>⚠️ Taux de réussite faible (<50%) - Optimisation nécessaire</li>"
+        summary += "\n- ⚠️ Taux de réussite faible (<50%) - Optimisation nécessaire"
 
     if stats['profit_factor'] >= 2:
-        html += "<li>✅ Excellent profit factor (≥2) - Gains >> Pertes</li>"
+        summary += "\n- ✅ Excellent profit factor (≥2) - Gains >> Pertes"
     elif stats['profit_factor'] >= 1:
-        html += "<li>✔️ Profit factor positif (≥1) - Stratégie rentable</li>"
+        summary += "\n- ✔️ Profit factor positif (≥1) - Stratégie rentable"
     else:
-        html += "<li>❌ Profit factor négatif (<1) - Stratégie non rentable</li>"
+        summary += "\n- ❌ Profit factor négatif (<1) - Stratégie non rentable"
 
     if stats['max_drawdown_pct'] <= 10:
-        html += "<li>✅ Drawdown contrôlé (≤10%)</li>"
+        summary += "\n- ✅ Drawdown contrôlé (≤10%)"
     elif stats['max_drawdown_pct'] <= 20:
-        html += "<li>⚠️ Drawdown modéré (10-20%)</li>"
+        summary += "\n- ⚠️ Drawdown modéré (10-20%)"
     else:
-        html += "<li>❌ Drawdown élevé (>20%) - Risque important</li>"
+        summary += "\n- ❌ Drawdown élevé (>20%) - Risque important"
 
     if stats['return_pct'] > 0:
-        html += f"<li>✅ Stratégie profitable avec {stats['return_pct']:.2f}% de rendement</li>"
+        summary += f"\n- ✅ Stratégie profitable avec {stats['return_pct']:.2f}% de rendement"
     else:
-        html += f"<li>❌ Stratégie non profitable ({stats['return_pct']:.2f}%)</li>"
+        summary += f"\n- ❌ Stratégie non profitable ({stats['return_pct']:.2f}%)"
 
-    html += """
-            </ul>
-        </div>
-    </div>
-    """
-
-    return html
+    return summary
 
 
 def create_trades_dataframe(trades: List[Dict]) -> pd.DataFrame:
@@ -350,22 +326,27 @@ def create_trades_dataframe(trades: List[Dict]) -> pd.DataFrame:
 
     df = pd.DataFrame(trades)
 
-    # Select and order columns
+    # Select base columns (always present)
     columns = ['datetime', 'side', 'price', 'qty', 'quote_qty']
 
-    # Add PnL columns for sell trades
+    # For SELL trades, add PnL-related columns
+    # For BUY trades, these will be filled with '-' or empty values
     if 'pnl' in df.columns:
-        columns.extend(['pnl', 'pnl_pct'])
+        columns.extend(['pnl', 'pnl_pct', 'entry_price', 'hold_time_hours'])
 
-    if 'entry_price' in df.columns:
-        columns.append('entry_price')
-
-    if 'hold_time_hours' in df.columns:
-        columns.append('hold_time_hours')
-
-    # Filter to available columns
+    # Filter to available columns and create a copy
     available_columns = [col for col in columns if col in df.columns]
     df = df[available_columns].copy()
+
+    # Fill NaN values for BUY trades with appropriate markers
+    if 'pnl' in df.columns:
+        df['pnl'] = df['pnl'].fillna(0)
+    if 'pnl_pct' in df.columns:
+        df['pnl_pct'] = df['pnl_pct'].fillna(0)
+    if 'entry_price' in df.columns:
+        df['entry_price'] = df['entry_price'].fillna(0)
+    if 'hold_time_hours' in df.columns:
+        df['hold_time_hours'] = df['hold_time_hours'].fillna(0)
 
     # Rename columns in French
     rename_map = {
@@ -384,24 +365,41 @@ def create_trades_dataframe(trades: List[Dict]) -> pd.DataFrame:
 
     # Format numeric columns
     if 'Prix ($)' in df.columns:
-        df['Prix ($)'] = df['Prix ($)'].apply(lambda x: f"{x:.2f}")
+        df['Prix ($)'] = df['Prix ($)'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
 
     if 'Quantité' in df.columns:
-        df['Quantité'] = df['Quantité'].apply(lambda x: f"{x:.6f}")
+        df['Quantité'] = df['Quantité'].apply(lambda x: f"{x:.6f}" if pd.notna(x) else "-")
 
     if 'Montant ($)' in df.columns:
-        df['Montant ($)'] = df['Montant ($)'].apply(lambda x: f"{x:.2f}")
+        df['Montant ($)'] = df['Montant ($)'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
 
+    # For P&L columns, show '-' for BUY trades (where values are 0)
     if 'P&L ($)' in df.columns:
-        df['P&L ($)'] = df['P&L ($)'].apply(lambda x: f"{x:.2f}")
+        pnl_col = 'P&L ($)'
+        df[pnl_col] = df.apply(
+            lambda row: "-" if row['Type'] == 'BUY' else f"{float(row[pnl_col]):.2f}",
+            axis=1
+        )
 
     if 'P&L (%)' in df.columns:
-        df['P&L (%)'] = df['P&L (%)'].apply(lambda x: f"{x:.2f}")
+        pnl_pct_col = 'P&L (%)'
+        df[pnl_pct_col] = df.apply(
+            lambda row: "-" if row['Type'] == 'BUY' else f"{float(row[pnl_pct_col]):.2f}",
+            axis=1
+        )
 
     if "Prix d'Entrée ($)" in df.columns:
-        df["Prix d'Entrée ($)"] = df["Prix d'Entrée ($)"].apply(lambda x: f"{x:.2f}")
+        entry_col = "Prix d'Entrée ($)"
+        df[entry_col] = df.apply(
+            lambda row: "-" if row['Type'] == 'BUY' else f"{float(row[entry_col]):.2f}",
+            axis=1
+        )
 
     if 'Détention (h)' in df.columns:
-        df['Détention (h)'] = df['Détention (h)'].apply(lambda x: f"{x:.2f}")
+        hold_col = 'Détention (h)'
+        df[hold_col] = df.apply(
+            lambda row: "-" if row['Type'] == 'BUY' else f"{float(row[hold_col]):.2f}",
+            axis=1
+        )
 
     return df

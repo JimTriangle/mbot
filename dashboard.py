@@ -278,8 +278,7 @@ with st.expander("⚙️ Configuration du Backtest", expanded=True):
         bt_days = st.slider("Période (jours)", min_value=1, max_value=90, value=30)
 
     with bt_col2:
-        bt_risk_pct = st.slider("Risque (% du capital)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-        bt_max_pos = st.number_input("Position max (USDT, 0=illimité)", min_value=0.0, value=1000.0, step=100.0)
+        bt_allocation_pct = st.slider("Allocation par trade (% du capital disponible)", min_value=1.0, max_value=100.0, value=10.0, step=1.0)
         bt_capital = st.number_input("Capital initial (USDT)", min_value=100.0, value=10000.0, step=100.0)
 
     # Date range calculation
@@ -299,8 +298,7 @@ if run_backtest:
                 interval=bt_interval,
                 start_date=start_date,
                 end_date=end_date,
-                risk_pct=bt_risk_pct,
-                max_pos=bt_max_pos,
+                allocation_pct=bt_allocation_pct,
                 initial_capital=bt_capital,
                 testnet=default_testnet,
                 api_key=api_key,
@@ -323,7 +321,7 @@ if 'backtest_results' in st.session_state:
     st.subheader("📊 Résultats de la Simulation")
 
     # Display statistics summary
-    st.markdown(create_statistics_summary(results['statistics']), unsafe_allow_html=True)
+    st.markdown(create_statistics_summary(results['statistics']))
 
     # Display interactive chart
     st.divider()
