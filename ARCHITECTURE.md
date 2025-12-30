@@ -30,11 +30,11 @@ Le projet est conçu avec une architecture modulaire permettant de gérer plusie
 
 
     ┌──────────────────────────────────┐
-    │   spot_btcusd.py (AUTONOME)      │
+    │   spot_btcusd.py (LEGACY)        │
     │                                  │
-    │ - Fonctionne indépendamment      │
-    │ - Même stratégie 3 swings        │
-    │ - Utilisé pour tests/debug       │
+    │ - Ancienne version autonome      │
+    │ - Stratégie 3 swings (deprecated)│
+    │ - Utilisé pour référence         │
     └──────────────────────────────────┘
 ```
 
@@ -63,16 +63,16 @@ Le projet est conçu avec une architecture modulaire permettant de gérer plusie
 
 **Classes** :
 
-#### `ThreeSwingsStrategy`
-- Détection des pivots (hauts/bas)
-- Analyse de structure (bullish/bearish)
-- Calcul des niveaux de breakout
-- Génération de signaux
+#### `TrendPhaseStrategy`
+- Calcul d'indicateurs techniques (EMA, RSI, ADX/DMI)
+- Détection de phases de tendance forte (haussière/baissière)
+- Génération de signaux BUY/SELL basés sur les changements de tendance
+- Inspirée du Pine Script "Phases de Tendance (Optimisé+)"
 
 #### `Bot`
 - Gère un bot pour une paire spécifique
 - Tourne dans son propre thread
-- Utilise `ThreeSwingsStrategy`
+- Utilise `TrendPhaseStrategy`
 - Écoute les websockets Binance
 - Exécute les trades (ou simule en dry_run)
 

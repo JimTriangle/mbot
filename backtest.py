@@ -1,5 +1,5 @@
 """
-Module de backtesting pour la stratégie 3 Swings
+Module de backtesting pour la stratégie TrendPhase
 Permet de simuler la stratégie sur des données historiques
 et d'analyser les performances
 """
@@ -10,11 +10,11 @@ from typing import List, Dict, Optional, Tuple
 from binance import AsyncClient
 import pandas as pd
 import numpy as np
-from bot_core import ThreeSwingsStrategy
+from bot_core import TrendPhaseStrategy
 
 
 class BacktestEngine:
-    """Moteur de backtesting pour la stratégie 3 Swings"""
+    """Moteur de backtesting pour la stratégie TrendPhase"""
 
     def __init__(
         self,
@@ -47,12 +47,8 @@ class BacktestEngine:
         self.api_secret = api_secret
 
         # Strategy instance
-        self.strategy = ThreeSwingsStrategy(
-            left=3,
-            right=3,
-            max_candles=200,
-            timeframe=interval,
-            min_pivot_distance=20
+        self.strategy = TrendPhaseStrategy(
+            timeframe=interval
         )
 
         # Position tracking
@@ -271,12 +267,8 @@ class BacktestEngine:
         self.price_data = candles
 
         # Reset strategy
-        self.strategy = ThreeSwingsStrategy(
-            left=3,
-            right=3,
-            max_candles=200,
-            timeframe=self.interval,
-            min_pivot_distance=20
+        self.strategy = TrendPhaseStrategy(
+            timeframe=self.interval
         )
 
         # Reset position
@@ -293,20 +285,6 @@ class BacktestEngine:
 
             # Update strategy with closed candle
             self.strategy.update(candle)
-
-            # Record pivots when they're confirmed
-            if self.strategy.high1 is not None and self.strategy.high1_time is not None:
-                # Check if this is a newly confirmed pivot
-                if not any(p['timestamp'] == self.strategy.high1_time and p['type'] == 'HIGH' for p in self.pivot_history):
-                    self._record_pivot('HIGH', self.strategy.high1, self.strategy.high1_time, i)
-
-            if self.strategy.low1 is not None and self.strategy.low1_time is not None:
-                # Check if this is a newly confirmed pivot
-                if not any(p['timestamp'] == self.strategy.low1_time and p['type'] == 'LOW' for p in self.pivot_history):
-                    self._record_pivot('LOW', self.strategy.low1, self.strategy.low1_time, i)
-
-            # Record breakout levels
-            self._record_breakout_levels(timestamp)
 
             # Check for signals (with cooldown)
             if timestamp - self.last_signal_time >= self.signal_cooldown:

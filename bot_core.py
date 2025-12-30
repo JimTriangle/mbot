@@ -1,6 +1,6 @@
 """
 Module bot_core.py - Classe Bot réutilisable pour le trading multi-paires.
-Basé sur la stratégie 3 swings de spot_btcusd.py mais modulaire et thread-safe.
+Basé sur une stratégie de détection de phases de tendance avec EMA, RSI et ADX.
 """
 import asyncio
 import threading
@@ -11,40 +11,60 @@ from time import strftime, localtime
 from storage import insert_trade, update_position, clear_position, insert_log
 
 
-class ThreeSwingsStrategy:
-    """Stratégie 3 swings avec détection REALISTE (réutilisable)"""
+class TrendPhaseStrategy:
+    """
+    Stratégie de détection de phases de tendance basée sur EMA, RSI et ADX/DMI.
+    Inspirée du Pine Script "Phases de Tendance (Optimisé+)".
+    """
 
-    def __init__(self, left=3, right=3, max_candles=200, timeframe="1m", min_pivot_distance=20):
-        self.left = left
-        self.right = right
+    def __init__(self,
+                 ema_short_length=20,
+                 ema_long_length=50,
+                 rsi_length=14,
+                 adx_length=14,
+                 adx_smoothing=14,
+                 adx_trend_threshold=25,
+                 rsi_up_threshold=55,
+                 rsi_down_threshold=35,
+                 max_candles=200,
+                 timeframe="1m"):
+
+        # Paramètres
+        self.ema_short_length = ema_short_length
+        self.ema_long_length = ema_long_length
+        self.rsi_length = rsi_length
+        self.adx_length = adx_length
+        self.adx_smoothing = adx_smoothing
+        self.adx_trend_threshold = adx_trend_threshold
+        self.rsi_up_threshold = rsi_up_threshold
+        self.rsi_down_threshold = rsi_down_threshold
         self.max_candles = max_candles
         self.timeframe = timeframe
-        self.min_pivot_distance = min_pivot_distance
 
+        # Données
         self.candles = deque(maxlen=max_candles)
 
-        # Pivots confirmés (avec lag)
-        self.low1 = None
-        self.low2 = None
-        self.low3 = None
-        self.high1 = None
-        self.high2 = None
-        self.high3 = None
-
-        self.low1_time = None
-        self.high1_time = None
-
-        # État structure
+        # États
         self.current_structure = None
+        self.strong_up_trend = False
+        self.strong_down_trend = False
+        self.previous_strong_up_trend = False
+        self.previous_strong_down_trend = False
+
+        # Signaux
         self.last_signal = None
         self.signal_count = {"BUY": 0, "SELL": 0}
-        self.false_signals = 0
 
-        # Niveaux de breakout
-        self.buy_level = None
-        self.sell_level = None
+        # Indicateurs calculés
+        self.ema_short = None
+        self.ema_long = None
+        self.rsi = None
+        self.adx = None
+        self.plus_di = None
+        self.minus_di = None
 
     def add_candle(self, timestamp, open_price, high, low, close, volume):
+        """Ajoute une bougie à l'historique"""
         candle = {
             'timestamp': timestamp,
             'open': open_price,
@@ -57,11 +77,10 @@ class ThreeSwingsStrategy:
 
     def update(self, candle):
         """
-        Update strategy with a new closed candle.
-        This is a convenience method for backtesting.
+        Met à jour la stratégie avec une nouvelle bougie fermée.
 
         Args:
-            candle: Dictionary with keys: timestamp, open, high, low, close, volume
+            candle: Dictionary avec les clés: timestamp, open, high, low, close, volume
         """
         self.add_candle(
             candle['timestamp'],
@@ -71,198 +90,252 @@ class ThreeSwingsStrategy:
             candle['close'],
             candle['volume']
         )
-        self.update_pivots()
-        self.current_structure = self.analyze_structure()
-        self.update_breakout_levels()
+        self._calculate_indicators()
+        self._update_trend_state()
 
-    def detect_pivot_high(self, index):
-        if index < self.left or index >= len(self.candles) - self.right:
+    def _calculate_ema(self, prices, period):
+        """Calcule l'EMA (Exponential Moving Average)"""
+        if len(prices) < period:
             return None
 
-        candles_list = list(self.candles)
-        center_high = candles_list[index]['high']
-        center_timestamp = candles_list[index]['timestamp']
+        multiplier = 2 / (period + 1)
+        ema = sum(prices[:period]) / period
 
-        for i in range(index - self.left, index):
-            if candles_list[i]['high'] >= center_high:
-                return None
+        for price in prices[period:]:
+            ema = (price - ema) * multiplier + ema
 
-        for i in range(index + 1, index + self.right + 1):
-            if candles_list[i]['high'] >= center_high:
-                return None
+        return ema
 
-        if self.high1 is not None:
-            distance = abs(center_high - self.high1)
-            if distance < self.min_pivot_distance:
-                return None
-
-        return (center_high, center_timestamp)
-
-    def detect_pivot_low(self, index):
-        if index < self.left or index >= len(self.candles) - self.right:
+    def _calculate_rsi(self, prices, period):
+        """Calcule le RSI (Relative Strength Index)"""
+        if len(prices) < period + 1:
             return None
 
-        candles_list = list(self.candles)
-        center_low = candles_list[index]['low']
-        center_timestamp = candles_list[index]['timestamp']
+        gains = []
+        losses = []
 
-        for i in range(index - self.left, index):
-            if candles_list[i]['low'] <= center_low:
-                return None
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i-1]
+            if change > 0:
+                gains.append(change)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(abs(change))
 
-        for i in range(index + 1, index + self.right + 1):
-            if candles_list[i]['low'] <= center_low:
-                return None
+        if len(gains) < period:
+            return None
 
-        if self.low1 is not None:
-            distance = abs(center_low - self.low1)
-            if distance < self.min_pivot_distance:
-                return None
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
 
-        return (center_low, center_timestamp)
+        if avg_loss == 0:
+            return 100
 
-    def update_pivots(self):
-        """Détecte les pivots CONFIRMES (avec right bougies de lag)"""
-        if len(self.candles) < self.left + self.right + 1:
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+
+        return rsi
+
+    def _calculate_true_range(self, candles):
+        """Calcule le True Range pour chaque bougie"""
+        tr_values = []
+
+        for i in range(1, len(candles)):
+            high = candles[i]['high']
+            low = candles[i]['low']
+            prev_close = candles[i-1]['close']
+
+            tr = max(
+                high - low,
+                abs(high - prev_close),
+                abs(low - prev_close)
+            )
+            tr_values.append(tr)
+
+        return tr_values
+
+    def _calculate_directional_movement(self, candles):
+        """Calcule +DM et -DM (Directional Movement)"""
+        plus_dm = []
+        minus_dm = []
+
+        for i in range(1, len(candles)):
+            high_diff = candles[i]['high'] - candles[i-1]['high']
+            low_diff = candles[i-1]['low'] - candles[i]['low']
+
+            if high_diff > low_diff and high_diff > 0:
+                plus_dm.append(high_diff)
+                minus_dm.append(0)
+            elif low_diff > high_diff and low_diff > 0:
+                plus_dm.append(0)
+                minus_dm.append(low_diff)
+            else:
+                plus_dm.append(0)
+                minus_dm.append(0)
+
+        return plus_dm, minus_dm
+
+    def _smooth_values(self, values, period):
+        """Lisse les valeurs (méthode Wilder's smoothing)"""
+        if len(values) < period:
+            return None
+
+        smoothed = [sum(values[:period])]
+
+        for i in range(period, len(values)):
+            smoothed_value = (smoothed[-1] * (period - 1) + values[i]) / period
+            smoothed.append(smoothed_value)
+
+        return smoothed[-1] if smoothed else None
+
+    def _calculate_dmi_adx(self, candles, adx_length, smoothing):
+        """Calcule DMI (DI+, DI-) et ADX"""
+        if len(candles) < adx_length + smoothing + 1:
+            return None, None, None
+
+        # Calcul True Range
+        tr_values = self._calculate_true_range(candles)
+
+        # Calcul Directional Movement
+        plus_dm, minus_dm = self._calculate_directional_movement(candles)
+
+        if len(tr_values) < adx_length or len(plus_dm) < adx_length:
+            return None, None, None
+
+        # Lissage des valeurs
+        smoothed_tr = self._smooth_values(tr_values[-adx_length:], adx_length)
+        smoothed_plus_dm = self._smooth_values(plus_dm[-adx_length:], adx_length)
+        smoothed_minus_dm = self._smooth_values(minus_dm[-adx_length:], adx_length)
+
+        if smoothed_tr is None or smoothed_tr == 0:
+            return None, None, None
+
+        # Calcul DI+ et DI-
+        plus_di = (smoothed_plus_dm / smoothed_tr) * 100
+        minus_di = (smoothed_minus_dm / smoothed_tr) * 100
+
+        # Calcul DX et ADX (simplifié)
+        di_sum = plus_di + minus_di
+        if di_sum == 0:
+            return plus_di, minus_di, None
+
+        dx = abs(plus_di - minus_di) / di_sum * 100
+
+        # ADX est une moyenne mobile du DX (simplifié ici)
+        adx = dx  # Simplification: on pourrait faire une vraie EMA du DX
+
+        return plus_di, minus_di, adx
+
+    def _calculate_indicators(self):
+        """Calcule tous les indicateurs techniques"""
+        if len(self.candles) < max(self.ema_long_length, self.rsi_length, self.adx_length + self.adx_smoothing):
             return
 
-        check_index = len(self.candles) - self.right - 1
+        candles_list = list(self.candles)
+        close_prices = [c['close'] for c in candles_list]
 
-        pivot_low_data = self.detect_pivot_low(check_index)
-        if pivot_low_data is not None:
-            pivot_low, timestamp = pivot_low_data
-            self.low3 = self.low2
-            self.low2 = self.low1
-            self.low1 = pivot_low
-            self.low1_time = timestamp
+        # EMA
+        self.ema_short = self._calculate_ema(close_prices, self.ema_short_length)
+        self.ema_long = self._calculate_ema(close_prices, self.ema_long_length)
 
-        pivot_high_data = self.detect_pivot_high(check_index)
-        if pivot_high_data is not None:
-            pivot_high, timestamp = pivot_high_data
-            self.high3 = self.high2
-            self.high2 = self.high1
-            self.high1 = pivot_high
-            self.high1_time = timestamp
+        # EMA précédente (pour détecter la croissance/décroissance)
+        if len(close_prices) > self.ema_short_length:
+            self.previous_ema_short = self._calculate_ema(close_prices[:-1], self.ema_short_length)
+        else:
+            self.previous_ema_short = None
 
-    def calculate_structure_strength(self):
-        if not all([self.low1, self.low2, self.low3, self.high1, self.high2, self.high3]):
-            return 0
+        # RSI
+        self.rsi = self._calculate_rsi(close_prices, self.rsi_length)
 
-        low_move_1 = abs(self.low1 - self.low2) / self.low2 * 100
-        low_move_2 = abs(self.low2 - self.low3) / self.low3 * 100
-        high_move_1 = abs(self.high1 - self.high2) / self.high2 * 100
-        high_move_2 = abs(self.high2 - self.high3) / self.high3 * 100
-
-        avg_strength = (low_move_1 + low_move_2 + high_move_1 + high_move_2) / 4
-        return avg_strength
-
-    def check_pivot_freshness(self):
-        if not self.low1_time or not self.high1_time:
-            return True
-
-        current_time = list(self.candles)[-1]['timestamp']
-        low_age = (current_time - self.low1_time) / 1000 / 60
-        high_age = (current_time - self.high1_time) / 1000 / 60
-
-        if low_age > 30 or high_age > 30:
-            return False
-
-        return True
-
-    def analyze_structure(self, min_structure_strength=0.3):
-        """Analyse structure (avec lag accepté)"""
-        have_3_lows = all(x is not None for x in [self.low1, self.low2, self.low3])
-        have_3_highs = all(x is not None for x in [self.high1, self.high2, self.high3])
-
-        if not (have_3_lows and have_3_highs):
-            return None
-
-        strength = self.calculate_structure_strength()
-        if strength < min_structure_strength:
-            return None
-
-        if not self.check_pivot_freshness():
-            return None
-
-        up_structure = (
-            self.low1 > self.low2 > self.low3 and
-            self.high1 > self.high2 > self.high3
+        # DMI et ADX
+        self.plus_di, self.minus_di, self.adx = self._calculate_dmi_adx(
+            candles_list, self.adx_length, self.adx_smoothing
         )
 
-        down_structure = (
-            self.low1 < self.low2 < self.low3 and
-            self.high1 < self.high2 < self.high3
+    def _update_trend_state(self):
+        """Met à jour l'état de la tendance"""
+        # Sauvegarder les états précédents
+        self.previous_strong_up_trend = self.strong_up_trend
+        self.previous_strong_down_trend = self.strong_down_trend
+
+        # Vérifier que tous les indicateurs sont calculés
+        if (self.ema_short is None or self.ema_long is None or
+            self.rsi is None or self.adx is None or
+            self.plus_di is None or self.minus_di is None or
+            self.previous_ema_short is None):
+            self.strong_up_trend = False
+            self.strong_down_trend = False
+            self.current_structure = None
+            return
+
+        # Détection de tendance haussière forte
+        self.strong_up_trend = (
+            self.ema_short > self.ema_long and
+            self.plus_di > self.minus_di and
+            self.rsi > self.rsi_up_threshold and
+            self.adx > self.adx_trend_threshold and
+            self.ema_short > self.previous_ema_short
         )
 
-        if up_structure:
-            return "bullish"
-        elif down_structure:
-            return "bearish"
+        # Détection de tendance baissière forte
+        self.strong_down_trend = (
+            self.ema_short < self.ema_long and
+            self.minus_di > self.plus_di and
+            self.rsi < self.rsi_down_threshold and
+            self.adx > self.adx_trend_threshold and
+            self.ema_short < self.previous_ema_short
+        )
+
+        # Mise à jour de la structure
+        if self.strong_up_trend:
+            self.current_structure = "bullish"
+        elif self.strong_down_trend:
+            self.current_structure = "bearish"
         else:
-            return None
-
-    def update_breakout_levels(self, breakout_threshold=0.05):
-        """Définit les niveaux de breakout EN TEMPS REEL"""
-        structure = self.analyze_structure()
-
-        if structure == "bullish" and self.high1:
-            self.buy_level = self.high1 * (1 + breakout_threshold / 100)
-            self.sell_level = None
-
-        elif structure == "bearish" and self.low1:
-            self.sell_level = self.low1 * (1 - breakout_threshold / 100)
-            self.buy_level = None
-
-        else:
-            self.buy_level = None
-            self.sell_level = None
+            self.current_structure = None
 
     def check_breakout(self, current_price, timestamp=None):
         """
-        Vérifie si le prix actuel casse un niveau de breakout.
-
-        Note: Le cooldown doit être géré par l'appelant.
+        Vérifie les signaux de trading basés sur les changements de tendance.
 
         Args:
-            current_price: Prix actuel à vérifier
-            timestamp: Timestamp optionnel (non utilisé, pour compatibilité)
+            current_price: Prix actuel
+            timestamp: Timestamp optionnel (pour compatibilité)
 
         Returns:
             "BUY", "SELL" ou None
         """
-        # BUY si prix casse le niveau haut
-        if self.buy_level and current_price > self.buy_level:
+        # Début de tendance haussière
+        if self.strong_up_trend and not self.previous_strong_up_trend:
             self.last_signal = "BUY"
             self.signal_count["BUY"] += 1
-            self.buy_level = None  # Reset niveau
             return "BUY"
 
-        # SELL si prix casse le niveau bas
-        if self.sell_level and current_price < self.sell_level:
+        # Début de tendance baissière OU fin de tendance haussière
+        if (self.strong_down_trend and not self.previous_strong_down_trend) or \
+           (self.previous_strong_up_trend and not self.strong_up_trend):
             self.last_signal = "SELL"
             self.signal_count["SELL"] += 1
-            self.sell_level = None  # Reset niveau
             return "SELL"
 
         return None
 
     def get_status(self):
-        strength = self.calculate_structure_strength()
-        fresh = self.check_pivot_freshness()
-
+        """Retourne le statut actuel de la stratégie"""
         return {
             'structure': self.current_structure,
-            'strength': strength,
-            'pivots_fresh': fresh,
+            'strong_up_trend': self.strong_up_trend,
+            'strong_down_trend': self.strong_down_trend,
             'last_signal': self.last_signal,
             'signal_count': self.signal_count,
-            'pivots': {
-                'highs': [self.high3, self.high2, self.high1],
-                'lows': [self.low3, self.low2, self.low1]
-            },
-            'breakout_levels': {
-                'buy': self.buy_level,
-                'sell': self.sell_level
+            'indicators': {
+                'ema_short': self.ema_short,
+                'ema_long': self.ema_long,
+                'rsi': self.rsi,
+                'adx': self.adx,
+                'plus_di': self.plus_di,
+                'minus_di': self.minus_di
             },
             'candles_count': len(self.candles)
         }
@@ -293,8 +366,8 @@ class Bot:
         self.entry_price = 0.0
 
         # Stratégie
-        self.strategy = ThreeSwingsStrategy(
-            left=3, right=3, timeframe=interval, min_pivot_distance=20
+        self.strategy = TrendPhaseStrategy(
+            timeframe=interval
         )
 
         # État du bot
@@ -359,41 +432,28 @@ class Bot:
         try:
             klines = await client.get_klines(symbol=self.symbol, interval=self.interval, limit=200)
 
+            # Ajouter toutes les bougies historiques
             for kline in klines:
-                self.strategy.add_candle(
-                    kline[0],  # timestamp
-                    float(kline[1]),  # open
-                    float(kline[2]),  # high
-                    float(kline[3]),  # low
-                    float(kline[4]),  # close
-                    float(kline[5])   # volume
-                )
-
-            # Scan des pivots initiaux
-            for i in range(self.strategy.left, len(self.strategy.candles) - self.strategy.right):
-                pivot_low_data = self.strategy.detect_pivot_low(i)
-                if pivot_low_data is not None:
-                    pivot_low, timestamp = pivot_low_data
-                    self.strategy.low3 = self.strategy.low2
-                    self.strategy.low2 = self.strategy.low1
-                    self.strategy.low1 = pivot_low
-                    self.strategy.low1_time = timestamp
-
-                pivot_high_data = self.strategy.detect_pivot_high(i)
-                if pivot_high_data is not None:
-                    pivot_high, timestamp = pivot_high_data
-                    self.strategy.high3 = self.strategy.high2
-                    self.strategy.high2 = self.strategy.high1
-                    self.strategy.high1 = pivot_high
-                    self.strategy.high1_time = timestamp
-
-            self.strategy.current_structure = self.strategy.analyze_structure()
-            self.strategy.update_breakout_levels()
+                candle = {
+                    'timestamp': kline[0],
+                    'open': float(kline[1]),
+                    'high': float(kline[2]),
+                    'low': float(kline[3]),
+                    'close': float(kline[4]),
+                    'volume': float(kline[5])
+                }
+                self.strategy.update(candle)
 
             status = self.strategy.get_status()
+            indicators = status.get('indicators', {})
+
             insert_log(self.symbol, "INFO",
-                      f"Stratégie initialisée: {status['structure'] or 'Non détectée'}, "
-                      f"Force: {status['strength']:.2f}%")
+                      f"Stratégie initialisée: {status['structure'] or 'Non détectée'}")
+
+            if indicators.get('ema_short') and indicators.get('rsi') and indicators.get('adx'):
+                insert_log(self.symbol, "INFO",
+                          f"EMA: {indicators['ema_short']:.2f}/{indicators['ema_long']:.2f}, "
+                          f"RSI: {indicators['rsi']:.2f}, ADX: {indicators['adx']:.2f}")
 
         except Exception as e:
             insert_log(self.symbol, "ERROR", f"Erreur initialisation: {e}")
@@ -427,17 +487,15 @@ class Bot:
 
                     # Traiter bougie fermée
                     if kline['x']:  # Bougie fermée
-                        timestamp = kline['t']
-                        open_price = float(kline['o'])
-                        high_price = float(kline['h'])
-                        low_price = float(kline['l'])
-                        close_price = float(kline['c'])
-                        volume = float(kline['v'])
-
-                        self.strategy.add_candle(timestamp, open_price, high_price, low_price, close_price, volume)
-                        self.strategy.update_pivots()
-                        self.strategy.current_structure = self.strategy.analyze_structure()
-                        self.strategy.update_breakout_levels()
+                        candle = {
+                            'timestamp': kline['t'],
+                            'open': float(kline['o']),
+                            'high': float(kline['h']),
+                            'low': float(kline['l']),
+                            'close': float(kline['c']),
+                            'volume': float(kline['v'])
+                        }
+                        self.strategy.update(candle)
 
                 except asyncio.TimeoutError:
                     continue
