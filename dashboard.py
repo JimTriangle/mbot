@@ -392,38 +392,38 @@ with tab_test:
             bt_strategy_info = bt_strategies_info[bt_selected_strategy]
             params_schema = bt_strategy_info['parameters']
 
-            with st.expander("⚙️ Paramètres de la stratégie (optionnel)", expanded=False):
-                for param_name, param_config in params_schema.items():
-                    param_type = param_config['type']
-                    default_value = param_config['default']
-                    description = param_config.get('description', '')
+            st.markdown("**⚙️ Paramètres de la stratégie (optionnel)**")
+            for param_name, param_config in params_schema.items():
+                param_type = param_config['type']
+                default_value = param_config['default']
+                description = param_config.get('description', '')
 
-                    if param_type == 'int':
-                        min_val = param_config.get('min', 1)
-                        max_val = param_config.get('max', 100)
-                        bt_strategy_params[param_name] = st.slider(
-                            description or param_name,
-                            min_value=int(min_val),
-                            max_value=int(max_val),
-                            value=int(default_value),
-                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
-                        )
-                    elif param_type == 'float':
-                        min_val = param_config.get('min', 0.0)
-                        max_val = param_config.get('max', 100.0)
-                        bt_strategy_params[param_name] = st.slider(
-                            description or param_name,
-                            min_value=float(min_val),
-                            max_value=float(max_val),
-                            value=float(default_value),
-                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
-                        )
-                    elif param_type == 'bool':
-                        bt_strategy_params[param_name] = st.checkbox(
-                            description or param_name,
-                            value=bool(default_value),
-                            key=f"bt_param_{bt_selected_strategy}_{param_name}"
-                        )
+                if param_type == 'int':
+                    min_val = param_config.get('min', 1)
+                    max_val = param_config.get('max', 100)
+                    bt_strategy_params[param_name] = st.slider(
+                        description or param_name,
+                        min_value=int(min_val),
+                        max_value=int(max_val),
+                        value=int(default_value),
+                        key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                    )
+                elif param_type == 'float':
+                    min_val = param_config.get('min', 0.0)
+                    max_val = param_config.get('max', 100.0)
+                    bt_strategy_params[param_name] = st.slider(
+                        description or param_name,
+                        min_value=float(min_val),
+                        max_value=float(max_val),
+                        value=float(default_value),
+                        key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                    )
+                elif param_type == 'bool':
+                    bt_strategy_params[param_name] = st.checkbox(
+                        description or param_name,
+                        value=bool(default_value),
+                        key=f"bt_param_{bt_selected_strategy}_{param_name}"
+                    )
 
         # Date range calculation
         st.divider()
