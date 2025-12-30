@@ -10,6 +10,7 @@ Ce package contient:
 
 from strategies.base import BaseStrategy
 from strategies.trend_phase import TrendPhaseStrategy
+from strategies.trend_phase_optimized import TrendPhaseOptimizedStrategy
 from strategies.three_swings import ThreeSwingsStrategy
 from strategies.registry import (
     STRATEGIES,
@@ -23,6 +24,7 @@ from strategies.registry import (
 __all__ = [
     'BaseStrategy',
     'TrendPhaseStrategy',
+    'TrendPhaseOptimizedStrategy',
     'ThreeSwingsStrategy',
     'STRATEGIES',
     'get_strategy_class',
