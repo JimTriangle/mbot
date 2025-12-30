@@ -55,6 +55,26 @@ class ThreeSwingsStrategy:
         }
         self.candles.append(candle)
 
+    def update(self, candle):
+        """
+        Update strategy with a new closed candle.
+        This is a convenience method for backtesting.
+
+        Args:
+            candle: Dictionary with keys: timestamp, open, high, low, close, volume
+        """
+        self.add_candle(
+            candle['timestamp'],
+            candle['open'],
+            candle['high'],
+            candle['low'],
+            candle['close'],
+            candle['volume']
+        )
+        self.update_pivots()
+        self.current_structure = self.analyze_structure()
+        self.update_breakout_levels()
+
     def detect_pivot_high(self, index):
         if index < self.left or index >= len(self.candles) - self.right:
             return None
@@ -197,30 +217,32 @@ class ThreeSwingsStrategy:
             self.buy_level = None
             self.sell_level = None
 
-    def check_breakout(self, current_price, signal_cooldown=10, last_signal_time=0):
-        """Vérifie si le prix actuel casse un niveau"""
-        if len(self.candles) == 0:
-            return None
+    def check_breakout(self, current_price, timestamp=None):
+        """
+        Vérifie si le prix actuel casse un niveau de breakout.
 
-        current_time = list(self.candles)[-1]['timestamp'] / 1000 / 60
-        time_since_last = current_time - last_signal_time
+        Note: Le cooldown doit être géré par l'appelant.
 
-        if time_since_last < signal_cooldown:
-            return None
+        Args:
+            current_price: Prix actuel à vérifier
+            timestamp: Timestamp optionnel (non utilisé, pour compatibilité)
 
+        Returns:
+            "BUY", "SELL" ou None
+        """
         # BUY si prix casse le niveau haut
         if self.buy_level and current_price > self.buy_level:
             self.last_signal = "BUY"
             self.signal_count["BUY"] += 1
             self.buy_level = None  # Reset niveau
-            return ("BUY", current_time)
+            return "BUY"
 
         # SELL si prix casse le niveau bas
         if self.sell_level and current_price < self.sell_level:
             self.last_signal = "SELL"
             self.signal_count["SELL"] += 1
             self.sell_level = None  # Reset niveau
-            return ("SELL", current_time)
+            return "SELL"
 
         return None
 
@@ -391,16 +413,17 @@ class Bot:
 
                     kline = msg['k']
                     current_close = float(kline['c'])
+                    current_time = kline['t']  # timestamp en millisecondes
 
-                    # Vérifier breakout sur chaque tick
-                    signal_result = self.strategy.check_breakout(
-                        current_close, signal_cooldown=10, last_signal_time=self.last_signal_time
-                    )
+                    # Vérifier breakout sur chaque tick (avec cooldown)
+                    signal_cooldown_ms = 10 * 60 * 1000  # 10 minutes en ms
+                    time_since_last = current_time - self.last_signal_time
 
-                    if signal_result:
-                        signal, current_time = signal_result
-                        self.last_signal_time = current_time
-                        await self._execute_signal(signal, current_close)
+                    if time_since_last >= signal_cooldown_ms:
+                        signal = self.strategy.check_breakout(current_close)
+                        if signal:
+                            self.last_signal_time = current_time
+                            await self._execute_signal(signal, current_close)
 
                     # Traiter bougie fermée
                     if kline['x']:  # Bougie fermée
