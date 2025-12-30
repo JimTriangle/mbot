@@ -82,6 +82,10 @@ class BacktestEngine:
         """
         Fetch historical kline data from Binance
 
+        IMPORTANT: Always uses PRODUCTION API for real historical data,
+        regardless of testnet setting. The testnet parameter only affects
+        trade execution, not historical data retrieval.
+
         Args:
             start_date: Start date for backtest
             end_date: End date for backtest
@@ -89,17 +93,12 @@ class BacktestEngine:
         Returns:
             List of candles with OHLCV data
         """
-        if self.testnet:
-            client = await AsyncClient.create(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                testnet=True
-            )
-        else:
-            client = await AsyncClient.create(
-                api_key=self.api_key,
-                api_secret=self.api_secret
-            )
+        # ALWAYS use production API for real historical data
+        client = await AsyncClient.create(
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            testnet=False  # Force production for historical data
+        )
 
         try:
             # Convert dates to milliseconds
@@ -114,23 +113,83 @@ class BacktestEngine:
                 end_ms
             )
 
-            # Convert to our format
+            # Convert to our format with validation
             candles = []
+            invalid_count = 0
+
             for k in klines:
-                candle = {
-                    'timestamp': int(k[0]),
-                    'open': float(k[1]),
-                    'high': float(k[2]),
-                    'low': float(k[3]),
-                    'close': float(k[4]),
-                    'volume': float(k[5]),
-                }
-                candles.append(candle)
+                try:
+                    candle = {
+                        'timestamp': int(k[0]),
+                        'open': float(k[1]),
+                        'high': float(k[2]),
+                        'low': float(k[3]),
+                        'close': float(k[4]),
+                        'volume': float(k[5]),
+                    }
+
+                    # Validate candle data
+                    if not self._is_valid_candle(candle):
+                        invalid_count += 1
+                        continue
+
+                    candles.append(candle)
+
+                except (ValueError, IndexError) as e:
+                    # Skip malformed candles
+                    invalid_count += 1
+                    continue
+
+            if invalid_count > 0:
+                print(f"⚠️ Warning: {invalid_count} invalid candles filtered out")
 
             return candles
 
         finally:
             await client.close_connection()
+
+    def _is_valid_candle(self, candle: Dict) -> bool:
+        """
+        Validate candle data to filter out corrupted or unrealistic values
+
+        Args:
+            candle: Candle dictionary with OHLCV data
+
+        Returns:
+            True if candle is valid, False otherwise
+        """
+        try:
+            o, h, l, c, v = candle['open'], candle['high'], candle['low'], candle['close'], candle['volume']
+
+            # Check for None, NaN, or infinite values
+            if any(x is None or np.isnan(x) or np.isinf(x) for x in [o, h, l, c, v]):
+                return False
+
+            # Check for negative or zero prices
+            if any(x <= 0 for x in [o, h, l, c]):
+                return False
+
+            # Validate OHLC relationship: high >= low, high >= open/close, low <= open/close
+            if h < l:
+                return False
+            if h < max(o, c) or l > min(o, c):
+                return False
+
+            # Check for extreme price movements (likely data corruption)
+            # A candle with > 10x range (high/low > 10) is suspicious
+            if h / l > 10.0:
+                return False
+
+            # Check for extreme outlier prices
+            # If the price range within a single candle is > 500% of the low, it's suspicious
+            price_range = h - l
+            if price_range > (l * 5.0):
+                return False
+
+            return True
+
+        except (KeyError, TypeError, ZeroDivisionError):
+            return False
 
     def _calculate_position_size(self, price: float) -> float:
         """Calculate position size based on allocation percentage of available capital"""
