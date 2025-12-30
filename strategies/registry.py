@@ -5,12 +5,14 @@ Permet d'instancier facilement une stratégie par son nom.
 from typing import Dict, Type, Any
 from strategies.base import BaseStrategy
 from strategies.trend_phase import TrendPhaseStrategy
+from strategies.trend_phase_optimized import TrendPhaseOptimizedStrategy
 from strategies.three_swings import ThreeSwingsStrategy
 
 
 # Registry global des stratégies disponibles
 STRATEGIES: Dict[str, Type[BaseStrategy]] = {
     "trend_phase": TrendPhaseStrategy,
+    "trend_phase_optimized": TrendPhaseOptimizedStrategy,
     "three_swings": ThreeSwingsStrategy,
 }
 
