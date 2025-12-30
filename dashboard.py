@@ -3,7 +3,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from storage import init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH
+from storage import (init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH,
+                     save_running_bot, remove_running_bot, fetch_running_bots)
 from bot_core import Bot
 
 def _load_env_file(path: Path) -> bool:
@@ -66,6 +67,54 @@ if "bots" not in st.session_state:
 
 init_db()
 
+# ----- Restore Running Bots -----
+def restore_bots():
+    """Restaure les bots depuis la base de données au démarrage."""
+    running_bots = fetch_running_bots()
+
+    for bot_data in running_bots:
+        symbol = bot_data["symbol"]
+
+        # Vérifier si le bot existe déjà dans la session et s'il est vivant
+        if symbol in st.session_state["bots"] and st.session_state["bots"][symbol].is_alive():
+            continue
+
+        # Recréer le bot
+        try:
+            bot = Bot(
+                symbol=symbol,
+                interval=bot_data["interval"],
+                risk_pct=bot_data["risk_pct"],
+                max_pos=bot_data["max_pos"],
+                testnet=bool(bot_data["testnet"]),
+                dry_run=bool(bot_data["dry_run"]),
+                api_key=bot_data["api_key"],
+                api_secret=bot_data["api_secret"]
+            )
+            bot.start()
+            st.session_state["bots"][symbol] = bot
+        except Exception as e:
+            # Si on ne peut pas restaurer le bot, on le supprime de la DB
+            remove_running_bot(symbol)
+
+# Nettoyer les bots morts de la session
+def cleanup_dead_bots():
+    """Supprime les bots qui ne sont plus en cours d'exécution de la session state."""
+    dead_bots = []
+    for symbol, bot in st.session_state["bots"].items():
+        if not bot.is_alive():
+            dead_bots.append(symbol)
+
+    for symbol in dead_bots:
+        del st.session_state["bots"][symbol]
+        remove_running_bot(symbol)
+
+if "restored" not in st.session_state:
+    restore_bots()
+    st.session_state["restored"] = True
+
+cleanup_dead_bots()
+
 st.set_page_config(page_title="Multi-Bot Binance (Spot)", layout="wide")
 st.title("🤖📈 Multi-Bot Binance Spot — Dashboard")
 
@@ -100,6 +149,8 @@ with st.sidebar:
                       testnet=testnet, dry_run=dry_run, api_key=api_key, api_secret=api_sec)
             bot.start()
             st.session_state["bots"][symbol] = bot
+            # Sauvegarder dans la DB pour persistance
+            save_running_bot(symbol, interval, risk_pct, max_pos, testnet, dry_run, api_key, api_sec)
             st.success(f"Bot {symbol} lancé en mode {'TESTNET' if testnet else 'PROD'} (dry_run={dry_run}).")
 
 st.subheader("Bots actifs")
@@ -125,6 +176,7 @@ for sym, bot in list(st.session_state["bots"].items()):
     if cols[3].button("Stop", key=f"stop_{sym}"):
         try:
             bot.stop()
+            remove_running_bot(sym)
         except Exception as e:
             st.error(f"Stop {sym} -> {e}")
 
@@ -138,6 +190,8 @@ for sym, bot in list(st.session_state["bots"].items()):
                               testnet=True, dry_run=True, api_key=bot.api_key, api_secret=bot.api_secret)
                 new_bot.start()
                 st.session_state["bots"][sym] = new_bot
+                # Mettre à jour dans la DB
+                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, True, True, bot.api_key, bot.api_secret)
                 st.success(f"{sym} relancé en TESTNET (dry_run=True).")
             except Exception as e:
                 st.error(f"Relance TEST {sym}: {e}")
@@ -148,6 +202,8 @@ for sym, bot in list(st.session_state["bots"].items()):
                               testnet=False, dry_run=False, api_key=bot.api_key, api_secret=bot.api_secret)
                 new_bot.start()
                 st.session_state["bots"][sym] = new_bot
+                # Mettre à jour dans la DB
+                save_running_bot(sym, bot.interval, bot.risk_pct, bot.max_pos, False, False, bot.api_key, bot.api_secret)
                 st.success(f"{sym} relancé en PROD (dry_run=False).")
             except Exception as e:
                 st.error(f"Relance PROD {sym}: {e}")
