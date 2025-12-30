@@ -10,6 +10,7 @@ from storage import (init_db, fetch_trades, fetch_positions, fetch_logs, DB_PATH
 from bot_core import Bot
 from backtest import run_backtest_async
 from backtest_viz import create_backtest_chart, create_statistics_summary, create_trades_dataframe, create_production_chart
+from realtime_viz import get_bot_realtime_data, create_realtime_chart
 
 def _load_env_file(path: Path) -> bool:
     """Load key=value pairs from *path* into os.environ if not already set."""
@@ -260,11 +261,11 @@ symbol_filter = st.text_input("Filtrer par symbole (optionnel)", value=os.getenv
 logs = fetch_logs(symbol_filter if symbol_filter else None, limit=200)
 st.dataframe(pd.DataFrame(logs))
 
-# ---- Tabs for TEST and PROD ----
+# ---- Tabs for TEST, PROD and REALTIME ----
 st.divider()
 st.header("📊 Analyse de Performance")
 
-tab_test, tab_prod = st.tabs(["🔬 TEST (Backtest)", "📈 PROD (Trading Réel)"])
+tab_test, tab_prod, tab_realtime = st.tabs(["🔬 TEST (Backtest)", "📈 PROD (Trading Réel)", "📡 SUIVI TEMPS RÉEL"])
 
 # ---- TEST TAB: Backtesting Section ----
 with tab_test:
@@ -580,5 +581,282 @@ with tab_prod:
         if st.button("🗑️ Effacer les graphiques de production"):
             del st.session_state['production_data']
             st.rerun()
+
+# ---- REALTIME TAB: Live Bot Monitoring ----
+with tab_realtime:
+    st.subheader("📡 Suivi des Bots en Temps Réel")
+    st.markdown("""
+    **Visualisez l'activité de vos bots en temps réel !**
+
+    Cette section affiche pour chaque bot actif :
+    - 📊 **Graphique en chandelier** avec les prix en temps réel
+    - 📈 **Indicateurs techniques** : EMA courte/longue, RSI, ADX/DMI
+    - 🎯 **Signaux de trading** : Points d'entrée (BUY) et de sortie (SELL)
+    - 💰 **Position actuelle** : Prix d'entrée, prix actuel, P&L non réalisé
+    - ⏱️ **Rafraîchissement automatique** : Les données se mettent à jour automatiquement
+
+    💡 **Astuce** : Vous pouvez zoomer sur les graphiques en cliquant-glissant, et double-cliquer pour réinitialiser.
+    """)
+
+    # Configuration de l'auto-refresh
+    with st.expander("⚙️ Configuration de l'Affichage", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            auto_refresh = st.checkbox("🔄 Rafraîchissement automatique", value=True)
+            if auto_refresh:
+                refresh_interval = st.slider(
+                    "Intervalle de rafraîchissement (secondes)",
+                    min_value=5,
+                    max_value=60,
+                    value=10,
+                    step=5
+                )
+
+        with col2:
+            show_indicators = st.checkbox("📊 Afficher les indicateurs", value=True)
+            show_pnl = st.checkbox("💰 Afficher le P&L", value=True)
+
+    # Récupération des bots actifs
+    active_bots = {sym: bot for sym, bot in st.session_state["bots"].items() if bot.is_alive()}
+
+    if not active_bots:
+        st.info("🤖 Aucun bot actif pour le moment. Lancez un bot depuis la barre latérale pour commencer !")
+    else:
+        st.success(f"✅ {len(active_bots)} bot(s) actif(s) détecté(s)")
+
+        # Sélection du bot à afficher (ou tous)
+        bot_symbols = ["Tous les bots"] + list(active_bots.keys())
+        selected_bot = st.selectbox(
+            "Sélectionner un bot à afficher",
+            options=bot_symbols,
+            key="realtime_bot_selector"
+        )
+
+        # Bouton de rafraîchissement manuel
+        col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 1, 4])
+        with col_refresh1:
+            manual_refresh = st.button("🔄 Rafraîchir Maintenant", type="primary")
+        with col_refresh2:
+            if st.button("⏸️ Arrêter Auto-Refresh"):
+                auto_refresh = False
+
+        st.divider()
+
+        # Affichage des graphiques
+        if selected_bot == "Tous les bots":
+            # Afficher tous les bots
+            for symbol, bot in active_bots.items():
+                with st.container():
+                    st.subheader(f"📊 {symbol}")
+
+                    # Informations du bot
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Statut", "🟢 En cours")
+                    col2.metric("Intervalle", bot.interval)
+                    col3.metric("Position", bot.pos_side)
+
+                    if bot.pos_side == "LONG" and hasattr(bot, 'entry_price'):
+                        # Note: Le P&L précis sera calculé avec le prix actuel du graphique
+                        col4.metric("P&L Non Réalisé", "Voir graphique")
+                    else:
+                        col4.metric("P&L Non Réalisé", "N/A")
+
+                    # Chargement des données
+                    try:
+                        with st.spinner(f"⏳ Chargement des données pour {symbol}..."):
+                            data = get_bot_realtime_data(
+                                symbol=symbol,
+                                interval=bot.interval,
+                                api_key=bot.api_key,
+                                api_secret=bot.api_secret,
+                                testnet=bot.testnet
+                            )
+
+                            # Mise à jour du prix actuel dans la position si elle existe
+                            if data['candles'] and data['position']:
+                                data['position']['current_price'] = data['candles'][-1]['close']
+
+                            # Création du graphique
+                            fig = create_realtime_chart(
+                                candles=data['candles'],
+                                symbol=symbol,
+                                interval=bot.interval,
+                                bot_position=data['position'],
+                                recent_trades=data['trades']
+                            )
+
+                            # Configuration du graphique
+                            plotly_config = {
+                                'displayModeBar': True,
+                                'displaylogo': False,
+                                'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+                                'toImageButtonOptions': {
+                                    'format': 'png',
+                                    'filename': f'realtime_{symbol}',
+                                    'height': 1000,
+                                    'width': 1600,
+                                    'scale': 2
+                                }
+                            }
+
+                            st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+
+                            # Affichage des statistiques
+                            if data['trades']:
+                                sell_trades = [t for t in data['trades'] if t['side'] == 'SELL' and t.get('pnl') is not None]
+                                if sell_trades:
+                                    st.markdown("**📊 Statistiques (dernières 24h)**")
+                                    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+
+                                    total_pnl = sum(t['pnl'] for t in sell_trades)
+                                    wins = len([t for t in sell_trades if t['pnl'] > 0])
+                                    losses = len([t for t in sell_trades if t['pnl'] <= 0])
+                                    win_rate = (wins / len(sell_trades) * 100) if sell_trades else 0
+
+                                    stat_col1.metric("Trades Fermés", len(sell_trades))
+                                    stat_col2.metric("Win Rate", f"{win_rate:.1f}%")
+                                    stat_col3.metric("P&L Total", f"{total_pnl:.2f} USDT", delta=f"{total_pnl:.2f}")
+                                    stat_col4.metric("P&L Moyen", f"{total_pnl/len(sell_trades):.2f} USDT")
+
+                    except Exception as e:
+                        st.error(f"❌ Erreur lors du chargement des données pour {symbol}: {str(e)}")
+                        st.exception(e)
+
+                    st.divider()
+
+        else:
+            # Afficher un seul bot sélectionné
+            symbol = selected_bot
+            bot = active_bots[symbol]
+
+            # Informations du bot
+            st.subheader(f"Détails du Bot - {symbol}")
+            info_col1, info_col2, info_col3, info_col4, info_col5 = st.columns(5)
+
+            info_col1.metric("Statut", "🟢 En cours")
+            info_col2.metric("Intervalle", bot.interval)
+            info_col3.metric("Position", bot.pos_side)
+            info_col4.metric("Risque", f"{bot.risk_pct*100:.1f}%")
+            info_col5.metric("Mode", "TESTNET" if bot.testnet else "PRODUCTION")
+
+            if bot.pos_side == "LONG":
+                position_info_col1, position_info_col2, position_info_col3 = st.columns(3)
+                position_info_col1.metric("Quantité", f"{bot.pos_qty:.8f}")
+                position_info_col2.metric("Prix d'Entrée", f"{bot.entry_price:.4f} USDT")
+
+                # Calculer le P&L non réalisé si on a le prix actuel
+                try:
+                    data_quick = get_bot_realtime_data(
+                        symbol=symbol,
+                        interval=bot.interval,
+                        api_key=bot.api_key,
+                        api_secret=bot.api_secret,
+                        testnet=bot.testnet
+                    )
+                    if data_quick['candles']:
+                        current_price = data_quick['candles'][-1]['close']
+                        pnl_unrealized = (current_price - bot.entry_price) * bot.pos_qty
+                        position_info_col3.metric("P&L Non Réalisé", f"{pnl_unrealized:.2f} USDT", delta=f"{pnl_unrealized:.2f}")
+                except:
+                    position_info_col3.metric("P&L Non Réalisé", "Calcul en cours...")
+
+            st.divider()
+
+            # Chargement et affichage du graphique
+            try:
+                with st.spinner(f"⏳ Chargement des données pour {symbol}..."):
+                    data = get_bot_realtime_data(
+                        symbol=symbol,
+                        interval=bot.interval,
+                        api_key=bot.api_key,
+                        api_secret=bot.api_secret,
+                        testnet=bot.testnet
+                    )
+
+                    # Mise à jour du prix actuel dans la position si elle existe
+                    if data['candles'] and data['position']:
+                        data['position']['current_price'] = data['candles'][-1]['close']
+
+                    # Création du graphique
+                    fig = create_realtime_chart(
+                        candles=data['candles'],
+                        symbol=symbol,
+                        interval=bot.interval,
+                        bot_position=data['position'],
+                        recent_trades=data['trades']
+                    )
+
+                    # Configuration du graphique
+                    plotly_config = {
+                        'displayModeBar': True,
+                        'displaylogo': False,
+                        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+                        'toImageButtonOptions': {
+                            'format': 'png',
+                            'filename': f'realtime_{symbol}',
+                            'height': 1000,
+                            'width': 1600,
+                            'scale': 2
+                        }
+                    }
+
+                    st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+
+                    # Affichage des statistiques détaillées
+                    st.divider()
+                    st.subheader("📊 Statistiques de Trading (dernières 24h)")
+
+                    if data['trades']:
+                        sell_trades = [t for t in data['trades'] if t['side'] == 'SELL' and t.get('pnl') is not None]
+
+                        if sell_trades:
+                            total_pnl = sum(t['pnl'] for t in sell_trades)
+                            wins = [t for t in sell_trades if t['pnl'] > 0]
+                            losses = [t for t in sell_trades if t['pnl'] <= 0]
+                            win_rate = (len(wins) / len(sell_trades) * 100) if sell_trades else 0
+
+                            stat_col1, stat_col2, stat_col3, stat_col4, stat_col5 = st.columns(5)
+                            stat_col1.metric("Total Trades", len(data['trades']))
+                            stat_col2.metric("Trades Fermés", len(sell_trades))
+                            stat_col3.metric("Win Rate", f"{win_rate:.1f}%")
+                            stat_col4.metric("P&L Total", f"{total_pnl:.2f} USDT", delta=f"{total_pnl:.2f}")
+                            stat_col5.metric("P&L Moyen", f"{total_pnl/len(sell_trades):.2f} USDT")
+
+                            # Tableau des trades récents
+                            st.divider()
+                            st.subheader("📝 Trades Récents (24h)")
+                            trades_df = create_trades_dataframe(data['trades'])
+                            st.dataframe(trades_df, use_container_width=True, height=300)
+                        else:
+                            st.info("Aucun trade fermé dans les dernières 24h")
+                    else:
+                        st.info("Aucun trade enregistré dans les dernières 24h")
+
+            except Exception as e:
+                st.error(f"❌ Erreur lors du chargement des données: {str(e)}")
+                st.exception(e)
+
+        # Auto-refresh si activé
+        if auto_refresh:
+            # Initialiser le dernier temps de refresh
+            if 'last_refresh_time' not in st.session_state:
+                st.session_state['last_refresh_time'] = time.time()
+
+            # Vérifier si l'intervalle est écoulé
+            current_time = time.time()
+            time_elapsed = current_time - st.session_state['last_refresh_time']
+
+            if time_elapsed >= refresh_interval or manual_refresh:
+                st.session_state['last_refresh_time'] = current_time
+                st.rerun()
+            else:
+                # Afficher un compteur
+                time_remaining = int(refresh_interval - time_elapsed)
+                st.info(f"🔄 Prochain rafraîchissement dans {time_remaining} secondes...")
+
+                # Forcer un rerun après 1 seconde pour mettre à jour le compteur
+                time.sleep(1)
+                st.rerun()
 
 st.caption(f"DB: {DB_PATH}")
